@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
 import database as db
+import sklad_sync  # sayt (CP Sklad) bilan sinxronizatsiya
 import keyboards as kb
 from states import Counting
 
@@ -167,6 +168,23 @@ async def count_done(call: CallbackQuery, state: FSMContext):
     count_id = await db.create_count(client_id, call.from_user.id, today)
     for pid, qty in items.items():
         await db.add_count_item(count_id, pid, qty)
+
+    # --- CP Sklad (sayt) ga sinxronlash ---------------------------------
+    # Bot ID -> sayt NOM: sync moduli nom bo'yicha bog'laydi.
+    try:
+        _items_by_name = {}
+        for _pid, _qty in items.items():
+            _p = await db.get_product(_pid)
+            if _p:
+                _items_by_name[_p["name"]] = _qty
+        _added, _errs = await sklad_sync.push_count(data["client_name"], _items_by_name)
+        if _errs:
+            import logging
+            logging.getLogger("sklad_sync").warning("Sayt sync ogohlantirish: %s", _errs)
+    except Exception:
+        import logging
+        logging.getLogger("sklad_sync").exception("Sayt sync xatosi (bot davom etadi)")
+    # --------------------------------------------------------------------
 
     lines = [f"✅ <b>{data['client_name']}</b> sanaldi ({today})\n"]
     total_value = 0.0
