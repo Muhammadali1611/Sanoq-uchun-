@@ -249,8 +249,8 @@ async def add_count_item(count_id: int, product_id: int, quantity: float):
         await db.commit()
 
 
-async def get_counts_by_date(date_str: str):
-    """Berilgan sanadagi barcha sanash qatorlari (tovar darajasida)."""
+async def _get_counts_by_date_sqlite(date_str: str):
+    """Berilgan sanadagi barcha sanash qatorlari (tovar darajasida). [ESKI/zaxira]"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
@@ -273,8 +273,8 @@ async def get_counts_by_date(date_str: str):
         return [dict(r) for r in await cur.fetchall()]
 
 
-async def get_counts_in_period(start_date: str, end_date: str):
-    """[start, end] oralig'idagi barcha sanash qatorlari."""
+async def _get_counts_in_period_sqlite(start_date: str, end_date: str):
+    """[start, end] oralig'idagi barcha sanash qatorlari. [ESKI/zaxira]"""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
@@ -296,6 +296,33 @@ async def get_counts_in_period(start_date: str, end_date: str):
             (start_date, end_date),
         )
         return [dict(r) for r in await cur.fetchall()]
+
+
+# ---------------------------------------------------------------------------
+# YO'L B: hisobot tarixini SAYTDAN o'qish (asosiy manba).
+# Sayt yiqilsa yoki tarmoq yo'q bo'lsa -> avtomatik SQLite zaxiraga tushadi
+# (bot yiqilmaydi). Odatda esa to'liq tarix (1488+) saytdan keladi.
+# ---------------------------------------------------------------------------
+async def get_counts_by_date(date_str: str):
+    try:
+        from sklad_read import counts_by_date_from_site
+        return await counts_by_date_from_site(date_str)
+    except Exception as e:
+        import logging
+        logging.getLogger("database").warning(
+            "get_counts_by_date: sayt o'qishda xato (%s) -> SQLite zaxira", e)
+        return await _get_counts_by_date_sqlite(date_str)
+
+
+async def get_counts_in_period(start_date: str, end_date: str):
+    try:
+        from sklad_read import counts_in_period_from_site
+        return await counts_in_period_from_site(start_date, end_date)
+    except Exception as e:
+        import logging
+        logging.getLogger("database").warning(
+            "get_counts_in_period: sayt o'qishda xato (%s) -> SQLite zaxira", e)
+        return await _get_counts_in_period_sqlite(start_date, end_date)
 
 
 async def get_last_session_for_client(client_id: int, before_date: str = None):
