@@ -20,7 +20,13 @@ _admin_raw = os.getenv("ADMIN_IDS", "")
 ADMIN_IDS = [int(x.strip()) for x in _admin_raw.split(",") if x.strip().isdigit()]
 
 # SQLite ma'lumotlar bazasi fayli
-DB_PATH = str(BASE_DIR / "sklad.db")
+# Railway'da Volume (/data) bo'lsa — o'sha yerda saqlanadi (deploy'da o'chmaydi).
+# Bo'lmasa — loyiha papkasida (kompyuterda test uchun).
+_VOLUME_DIR = "/data"
+if os.path.isdir(_VOLUME_DIR):
+    DB_PATH = os.path.join(_VOLUME_DIR, "sklad.db")
+else:
+    DB_PATH = str(BASE_DIR / "sklad.db")
 
 # --- Tahlil sozlamalari (keyin o'zgartirsa bo'ladi) ---
 # Qoplama kuni: zaxira necha kunga yetadi (qoldiq / kunlik sotuv)

@@ -12,6 +12,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 import config
 import database as db
 from handlers import common, admin, agent, reports
+import import_from_site  # saytdan tiklash buyrug'i
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)s | %(message)s")
@@ -31,6 +32,7 @@ async def main():
 
     # Routerlar (tartib muhim: maxsus -> umumiy)
     dp.include_router(agent.router)
+    dp.include_router(import_from_site.router)
     dp.include_router(reports.router)
     dp.include_router(admin.router)
     dp.include_router(common.router)
