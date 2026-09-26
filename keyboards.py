@@ -26,12 +26,8 @@ BTN_CANCEL = "❌ Bekor qilish"
 
 def main_menu(role: str) -> ReplyKeyboardMarkup:
     rows = []
-    if role == "agent":
-        rows = [
-            [KeyboardButton(text=BTN_COUNT), KeyboardButton(text=BTN_SEARCH)],
-            [KeyboardButton(text=BTN_CLIENTS), KeyboardButton(text=BTN_PRODUCTS)],
-        ]
-    elif role == "manager":
+    if role in ("agent", "manager"):
+        # Agent va menejer bir xil huquqqa ega (xodim qo'shishdan tashqari hammasi)
         rows = [
             [KeyboardButton(text=BTN_COUNT), KeyboardButton(text=BTN_SEARCH)],
             [KeyboardButton(text=BTN_DAILY), KeyboardButton(text=BTN_MONTHLY)],
@@ -67,6 +63,18 @@ def regions_kb(regions: list, action: str) -> InlineKeyboardMarkup:
         kb.button(text=f"{rg['region']} ({rg['cnt']})", callback_data=f"{action}:rg:{i}")
     kb.adjust(2)
     kb.row(InlineKeyboardButton(text="🔍 Ism bo'yicha qidirish", callback_data=f"{action}:srch"))
+    return kb.as_markup()
+
+
+def add_client_regions_kb(regions: list) -> InlineKeyboardMarkup:
+    """Klent qo'shishda region TANLASH tugmalari.
+    Regionni qo'lda yozish o'rniga mavjudini bosib tanlaydi —
+    shu tufayli apostrof farqidan dubl region ochilmaydi."""
+    kb = InlineKeyboardBuilder()
+    for i, rg in enumerate(regions):
+        kb.button(text=f"{rg['region']} ({rg['cnt']})", callback_data=f"acreg:rg:{i}")
+    kb.adjust(2)
+    kb.row(InlineKeyboardButton(text="➕ Yangi region", callback_data="acreg:new"))
     return kb.as_markup()
 
 
