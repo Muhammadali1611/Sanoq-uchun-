@@ -21,7 +21,7 @@ UZ_MONTHS = ["", "Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun",
 
 async def _can_report(user_id):
     u = await db.get_user(user_id)
-    return u and u["role"] in ("manager", "admin")
+    return u and u["role"] in ("agent", "manager", "admin")
 
 
 # ---------------------------------------------------------------------------
