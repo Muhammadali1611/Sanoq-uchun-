@@ -125,11 +125,11 @@ async def staff_list(message: Message):
 
 
 # ---------------------------------------------------------------------------
-# Klent qo'shish (admin + menejer) — region bilan
+# Klent qo'shish (admin + menejer + agent) — region TUGMA orqali tanlanadi
 # ---------------------------------------------------------------------------
 @router.message(F.text == kb.BTN_ADD_CLIENT)
 async def add_client_start(message: Message, state: FSMContext):
-    if await _role(message.from_user.id) not in ("admin", "manager"):
+    if await _role(message.from_user.id) not in ("admin", "manager", "agent"):
         return
     await state.set_state(AddClient.waiting_name)
     await message.answer("Yangi klent nomini yozing:", reply_markup=kb.cancel_menu())
@@ -137,19 +137,57 @@ async def add_client_start(message: Message, state: FSMContext):
 
 @router.message(AddClient.waiting_name)
 async def add_client_name(message: Message, state: FSMContext):
-    await state.update_data(name=message.text.strip())
-    await state.set_state(AddClient.waiting_region)
+    name = message.text.strip()
+    await state.update_data(name=name)
     regions = await db.get_regions()
-    hint = ", ".join(r["region"] for r in regions[:8]) if regions else "masalan: Qo'qon"
-    await message.answer(f"Regionini yozing (mavjudlardan biri yoki yangi):\n<i>{hint}...</i>")
+    if regions:
+        # Mavjud regionlarni tugma qilib beramiz — qo'lda yozilmaydi, dubl ochilmaydi
+        await state.set_state(AddClient.waiting_region)
+        await message.answer(
+            f"<b>{name}</b> — qaysi regionga qo'shamiz?",
+            reply_markup=kb.add_client_regions_kb(regions),
+        )
+    else:
+        # Hali biror region yo'q — to'g'ridan-to'g'ri yangi region so'raymiz
+        await state.set_state(AddClient.waiting_new_region)
+        await message.answer("Region nomini yozing (yoki «-»):",
+                             reply_markup=kb.cancel_menu())
 
 
-@router.message(AddClient.waiting_region)
-async def add_client_region(message: Message, state: FSMContext):
+@router.callback_query(AddClient.waiting_region, F.data.startswith("acreg:rg:"))
+async def add_client_pick_region(call: CallbackQuery, state: FSMContext):
+    idx = int(call.data.split(":")[2])
+    regions = await db.get_regions()
+    if idx >= len(regions):
+        await call.answer("Ro'yxat yangilandi, qaytadan tanlang", show_alert=True)
+        await call.message.edit_reply_markup(
+            reply_markup=kb.add_client_regions_kb(regions))
+        return
+    label = regions[idx]["region"]
+    # "Boshqa" — bu region NULL bo'lgan klentlar guruhi
+    region = None if label == "Boshqa" else label
+    await state.update_data(region=region)
+    await state.set_state(AddClient.waiting_phone)
+    await call.message.edit_text(f"📍 Region: <b>{label}</b>")
+    await call.message.answer("Telefon raqamini yozing (yoki «-»):",
+                              reply_markup=kb.cancel_menu())
+    await call.answer()
+
+
+@router.callback_query(AddClient.waiting_region, F.data == "acreg:new")
+async def add_client_new_region_ask(call: CallbackQuery, state: FSMContext):
+    await state.set_state(AddClient.waiting_new_region)
+    await call.message.answer("Yangi region nomini yozing:", reply_markup=kb.cancel_menu())
+    await call.answer()
+
+
+@router.message(AddClient.waiting_new_region)
+async def add_client_new_region_save(message: Message, state: FSMContext):
     region = message.text.strip()
     await state.update_data(region=None if region in ("-", "—") else region)
     await state.set_state(AddClient.waiting_phone)
-    await message.answer("Telefon raqamini yozing (yoki «-»):")
+    await message.answer("Telefon raqamini yozing (yoki «-»):",
+                         reply_markup=kb.cancel_menu())
 
 
 @router.message(AddClient.waiting_phone)
@@ -169,7 +207,7 @@ async def add_client_phone(message: Message, state: FSMContext):
 # ---------------------------------------------------------------------------
 @router.message(F.text == kb.BTN_ADD_PRODUCT)
 async def add_product_start(message: Message, state: FSMContext):
-    if await _role(message.from_user.id) not in ("admin", "manager"):
+    if await _role(message.from_user.id) not in ("admin", "manager", "agent"):
         return
     await state.set_state(AddProduct.waiting_name)
     await message.answer("Yangi tovar nomini yozing:", reply_markup=kb.cancel_menu())
@@ -212,7 +250,7 @@ async def add_product_price(message: Message, state: FSMContext):
 # ---------------------------------------------------------------------------
 @router.message(F.text == kb.BTN_DEL_CLIENT)
 async def del_client_start(message: Message, state: FSMContext):
-    if await _role(message.from_user.id) not in ("admin", "manager"):
+    if await _role(message.from_user.id) not in ("admin", "manager", "agent"):
         return
     await state.set_state(DelClient.waiting)
     await message.answer("O'chiriladigan klent ismini yozing:", reply_markup=kb.cancel_menu())
@@ -262,7 +300,7 @@ async def del_client_no(call: CallbackQuery, state: FSMContext):
 # ---------------------------------------------------------------------------
 @router.message(F.text == kb.BTN_DEL_PRODUCT)
 async def del_product_start(message: Message):
-    if await _role(message.from_user.id) not in ("admin", "manager"):
+    if await _role(message.from_user.id) not in ("admin", "manager", "agent"):
         return
     products = await db.get_products()
     if not products:
@@ -303,7 +341,7 @@ async def del_product_no(call: CallbackQuery):
 # ---------------------------------------------------------------------------
 @router.message(F.text == kb.BTN_EDIT_COUNT)
 async def edit_count_start(message: Message, state: FSMContext):
-    if await _role(message.from_user.id) not in ("admin", "manager"):
+    if await _role(message.from_user.id) not in ("admin", "manager", "agent"):
         return
     await state.set_state(EditCount.searching)
     await message.answer("Tuzatmoqchi bo'lgan klent ismini yozing:", reply_markup=kb.cancel_menu())
