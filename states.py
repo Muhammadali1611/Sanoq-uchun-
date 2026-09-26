@@ -9,7 +9,8 @@ class AddUser(StatesGroup):          # admin qo'lda foydalanuvchi qo'shadi
 
 class AddClient(StatesGroup):
     waiting_name = State()
-    waiting_region = State()
+    waiting_region = State()        # region tugmalaridan tanlash
+    waiting_new_region = State()    # «➕ Yangi region» tanlansa — matn kiritish
     waiting_phone = State()
 
 
