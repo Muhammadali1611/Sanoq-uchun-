@@ -77,6 +77,12 @@ async def set_setting(key, value):
             "INSERT INTO bot_settings (key, value) VALUES (?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value", (key, str(value)))
         await conn.commit()
+    # Supabase'ga zaxira (Railway qayta ishga tushsa ham sozlama o'chmaydi)
+    try:
+        import bot_state
+        bot_state.setting_saved(key, str(value))
+    except Exception:
+        log.exception("sozlama zaxiralanmadi")
 
 
 async def get_group_chat():

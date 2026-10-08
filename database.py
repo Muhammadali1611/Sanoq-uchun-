@@ -71,7 +71,7 @@ async def init_db():
     for admin_id in ADMIN_IDS:
         existing = await get_user(admin_id)
         if not existing:
-            await add_user(admin_id, "Admin", "admin", added_by=None)
+            await add_user(admin_id, "Admin", "admin", added_by=None, _sync=False)
 
 
 def _now():
@@ -81,14 +81,23 @@ def _now():
 # ---------------------------------------------------------------------------
 # Foydalanuvchilar
 # ---------------------------------------------------------------------------
-async def add_user(user_id: int, full_name: str, role: str, added_by=None):
+async def add_user(user_id: int, full_name: str, role: str, added_by=None, _sync=True):
+    created = _now()
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
             "INSERT OR REPLACE INTO users (id, full_name, role, added_by, created_at) "
             "VALUES (?, ?, ?, ?, ?)",
-            (user_id, full_name, role, added_by, _now()),
+            (user_id, full_name, role, added_by, created),
         )
         await db.commit()
+    if _sync:
+        # Supabase'ga zaxira — Railway qayta ishga tushsa ham xodim o'chmaydi
+        try:
+            import bot_state
+            bot_state.user_saved({"id": user_id, "full_name": full_name, "role": role,
+                                  "added_by": added_by, "created_at": created})
+        except Exception:
+            pass
 
 
 async def get_user(user_id: int):
@@ -116,6 +125,11 @@ async def delete_user(user_id: int):
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("DELETE FROM users WHERE id = ?", (user_id,))
         await db.commit()
+    try:
+        import bot_state
+        bot_state.user_deleted(user_id)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------

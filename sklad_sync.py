@@ -54,13 +54,23 @@ def _norm(s: str) -> str:
 # ---------------------------------------------------------------------------
 def _http_get_blob():
     """cp_sklad qatorini o'qib, (row_dict, blob_dict) qaytaradi."""
-    url = f"{SUPABASE_URL}/rest/v1/{TABLE}?select=*"
-    req = urllib.request.Request(url, headers={
-        "apikey": ANON_KEY,
-        "Authorization": f"Bearer {ANON_KEY}",
-    })
-    with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
-        rows = json.loads(r.read().decode())
+    # Sayt aynan id='main' qatorini ishlatadi. Jadvalda boshqa qatorlar ham
+    # bo'lishi mumkin (masalan botning 'bot_state' zaxirasi) — shuning uchun
+    # avval 'main' ni so'raymiz, topilmasa eski usulda birinchi qatorni olamiz.
+    rows = []
+    for q in ("id=eq.main&select=*", "select=*"):
+        req = urllib.request.Request(f"{SUPABASE_URL}/rest/v1/{TABLE}?{q}", headers={
+            "apikey": ANON_KEY,
+            "Authorization": f"Bearer {ANON_KEY}",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=_TIMEOUT) as r:
+                rows = json.loads(r.read().decode())
+        except urllib.error.HTTPError:
+            rows = []
+        rows = [x for x in rows if str(x.get("id")) != "bot_state"]
+        if rows:
+            break
     if not rows:
         raise RuntimeError("cp_sklad jadvali bo'sh")
     row = rows[0]

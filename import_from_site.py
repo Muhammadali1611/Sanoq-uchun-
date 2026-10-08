@@ -52,14 +52,9 @@ def _norm(s):
 
 
 def _fetch_site_blob():
-    url = f"{SUPABASE_URL}/rest/v1/{TABLE}?select=*"
-    req = urllib.request.Request(url, headers={
-        "apikey": ANON_KEY,
-        "Authorization": f"Bearer {ANON_KEY}",
-    })
-    with urllib.request.urlopen(req, timeout=30) as r:
-        rows = json.loads(r.read().decode())
-    row = rows[0]
+    # sklad_sync dagi bilan bir xil: aynan id='main' qatori (bot_state emas)
+    from sklad_sync import _http_get_blob
+    row = _http_get_blob()[0]
     if "clients" in row and "counts" in row:
         return row
     for v in row.values():
