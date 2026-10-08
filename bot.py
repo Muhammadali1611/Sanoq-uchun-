@@ -11,10 +11,11 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 import config
 import database as db
-from handlers import common, admin, agent, reports, count_delete
+from handlers import common, admin, agent, reports, count_delete, merge_names
 import import_from_site  # saytdan tiklash buyrug'i
 import group_notify      # guruhga avto xabarlar (topiclar)
 import bot_state         # xodimlar/sozlamalar zaxirasi (Supabase)
+import catalog_sync      # tovar/klent ro'yxati saytdan
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)s | %(message)s")
@@ -27,6 +28,10 @@ async def main():
     await db.init_db()
     await group_notify.init()
     await bot_state.restore()   # xodimlar + guruh sozlamalari Supabase'dan
+    try:
+        await catalog_sync.sync_from_site()   # tovar/klentlar — saytdagi nomlar bilan
+    except Exception:
+        logging.exception("Katalog saytdan olinmadi (eski ro'yxat bilan davom etiladi)")
 
     bot = Bot(
         token=config.BOT_TOKEN,
@@ -37,6 +42,7 @@ async def main():
     # Routerlar (tartib muhim: maxsus -> umumiy)
     dp.include_router(group_notify.router)   # /topic, /sotuv_tekshir (guruh)
     dp.include_router(count_delete.router)   # 🗑 Sanoqni o'chirish (admin)
+    dp.include_router(merge_names.router)    # /nomlarni_birlashtir (admin)
     dp.include_router(agent.router)
     dp.include_router(import_from_site.router)
     dp.include_router(reports.router)

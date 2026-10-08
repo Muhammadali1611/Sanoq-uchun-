@@ -516,6 +516,11 @@ async def sales_watcher(bot: Bot):
             await check_new_sales(bot)
         except Exception:
             log.exception("Sotuv kuzatuvchida xato (keyingi safar qayta urinadi)")
+        try:
+            import catalog_sync
+            await catalog_sync.sync_from_site()   # saytdagi yangi tovar/klentlar botga
+        except Exception:
+            log.exception("Katalog yangilanmadi")
         await asyncio.sleep(max(SALES_CHECK_MIN, 1) * 60)
 
 

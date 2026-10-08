@@ -3,6 +3,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
+import catalog_sync
 import database as db
 import keyboards as kb
 from states import AddUser, AddClient, AddProduct, DelClient, EditCount
@@ -195,6 +196,8 @@ async def add_client_phone(message: Message, state: FSMContext):
     data = await state.get_data()
     phone = None if message.text.strip() in ("-", "—") else message.text.strip()
     await db.add_client(data["name"], region=data.get("region"), phone=phone)
+    await catalog_sync.hide("clients", data["name"], hidden=False)
+    await catalog_sync.push_client(data["name"], data.get("region"))   # saytga ham
     role = await _role(message.from_user.id)
     await state.clear()
     reg = f" ({data['region']})" if data.get("region") else ""
@@ -237,6 +240,8 @@ async def add_product_price(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     await db.add_product(data["name"], data["unit"], price)
+    await catalog_sync.hide("products", data["name"], hidden=False)
+    await catalog_sync.push_product(data["name"], price)               # saytga ham
     role = await _role(message.from_user.id)
     await state.clear()
     await message.answer(
@@ -283,6 +288,7 @@ async def del_client_yes(call: CallbackQuery, state: FSMContext):
     cid = int(call.data.split(":")[2])
     client = await db.get_client(cid)
     await db.delete_client(cid)
+    await catalog_sync.hide("clients", client["name"])   # saytdan sync qayta yoqmasin
     await state.clear()
     await call.message.edit_text(f"🗑 <b>{client['name']}</b> o'chirildi.")
     await call.answer("O'chirildi")
@@ -326,6 +332,7 @@ async def del_product_yes(call: CallbackQuery):
     pid = int(call.data.split(":")[2])
     p = await db.get_product(pid)
     await db.delete_product(pid)
+    await catalog_sync.hide("products", p["name"])       # saytdan sync qayta yoqmasin
     await call.message.edit_text(f"🗑 <b>{p['name']}</b> o'chirildi.")
     await call.answer("O'chirildi")
 

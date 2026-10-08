@@ -37,7 +37,7 @@ def build_report(blob, site_client_id, product_ids, date_str, time_str,
     client = clients.get(str(site_client_id), {})
     rows, prev_dates = [], []
 
-    for pid in product_ids:
+    for pid in dict.fromkeys(product_ids):   # takroriy tovarni bir marta ko'rsatish
         p = products.get(str(pid), {})
         price = sa._num(p.get("price"))
         a = sa.analyze_client_product(blob, site_client_id, pid, today_str=today_str)
@@ -215,7 +215,7 @@ def render_png(rep, scale=2) -> bytes:
     for r in rep["low"]:
         tail = f", ~{_kun(r['cover'])}ga yetadi" if r["cover"] is not None else ""
         alerts.append(("red", f"{r['name']} — {_n(r['today'])} qop qoldi{tail}. "
-                       f"Min {sa.LOW_STOCK} qop bo'lishi kerak — akaga yuk taklif qiling."))
+                       f"Min {sa.LOW_STOCK} — yuk taklif qiling."))
     for r in rep["stuck"]:
         alerts.append(("orange", f"{r['name']} — {r['days_idle']} kundan beri sotilmayapti "
                        f"({_n(r['today'])} qop turibdi)."))
