@@ -23,6 +23,11 @@ FAST_COVER = 15
 SLOW_COVER = 45
 STUCK_DAYS = 21       # shuncha kun sotuv bo'lmasa -> turib qolgan
 
+# Polka qamrovida hisobga olinmaydigan (to'xtatilgan) brendlar — nom boshi bo'yicha.
+# ENV: SHELF_EXCLUDE="Concrete,Barpo"
+import os as _os
+SHELF_EXCLUDE = [x for x in _os.getenv("SHELF_EXCLUDE", "Concrete").split(",") if x.strip()]
+
 STATUS_LBL = {
     "tez": "🟢 Tez", "sekin": "🟠 Sekin", "turgan": "🔴 Turib qolgan",
     "normal": "⚪ Normal", "yangi": "🔵 Yangi",

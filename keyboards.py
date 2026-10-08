@@ -22,6 +22,7 @@ BTN_ADD_MANAGER = "➕ Menejer qo'shish"
 BTN_STAFF = "🧑‍💼 Xodimlar"
 BTN_EDIT_COUNT = "✏️ Tuzatish"
 BTN_CANCEL = "❌ Bekor qilish"
+BTN_DEL_COUNT = "🗑 Sanoqni o'chirish"   # faqat admin (sayt + bot + guruh)
 
 
 def main_menu(role: str) -> ReplyKeyboardMarkup:
@@ -40,7 +41,7 @@ def main_menu(role: str) -> ReplyKeyboardMarkup:
         rows = [
             [KeyboardButton(text=BTN_SEARCH), KeyboardButton(text=BTN_EDIT_COUNT)],
             [KeyboardButton(text=BTN_DAILY), KeyboardButton(text=BTN_MONTHLY)],
-            [KeyboardButton(text=BTN_ANALYZE)],
+            [KeyboardButton(text=BTN_ANALYZE), KeyboardButton(text=BTN_DEL_COUNT)],
             [KeyboardButton(text=BTN_ADD_CLIENT), KeyboardButton(text=BTN_ADD_PRODUCT)],
             [KeyboardButton(text=BTN_DEL_CLIENT), KeyboardButton(text=BTN_DEL_PRODUCT)],
             [KeyboardButton(text=BTN_ADD_AGENT), KeyboardButton(text=BTN_ADD_MANAGER)],

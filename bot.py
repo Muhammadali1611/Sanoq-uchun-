@@ -11,7 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 
 import config
 import database as db
-from handlers import common, admin, agent, reports
+from handlers import common, admin, agent, reports, count_delete
 import import_from_site  # saytdan tiklash buyrug'i
 import group_notify      # guruhga avto xabarlar (topiclar)
 
@@ -34,6 +34,7 @@ async def main():
 
     # Routerlar (tartib muhim: maxsus -> umumiy)
     dp.include_router(group_notify.router)   # /topic, /sotuv_tekshir (guruh)
+    dp.include_router(count_delete.router)   # 🗑 Sanoqni o'chirish (admin)
     dp.include_router(agent.router)
     dp.include_router(import_from_site.router)
     dp.include_router(reports.router)

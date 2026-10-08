@@ -255,3 +255,22 @@ if __name__ == "__main__":
         print("\nO'qish OK. Yozish sinovini bot orqali qilamiz.")
     except Exception as e:
         print("XATO:", e)
+
+
+# ---------------------------------------------------------------------------
+# Umumiy: blokni o'qib -> o'zgartirib -> qaytarib yozish (o'chirish uchun)
+# ---------------------------------------------------------------------------
+def update_blob_blocking(mutator):
+    """mutator(blob) -> natija. Yozishdan AYNAN oldin eng yangi nusxa o'qiladi.
+    mutator None qaytarsa — hech narsa yozilmaydi."""
+    row, blob, blob_col = _http_get_blob()
+    pk_col, pk_val = _detect_pk(row)
+    result = mutator(blob)
+    if result is None:
+        return None
+    _http_patch_blob(row, blob, blob_col, pk_col, pk_val)
+    return result
+
+
+async def update_blob(mutator):
+    return await asyncio.to_thread(update_blob_blocking, mutator)

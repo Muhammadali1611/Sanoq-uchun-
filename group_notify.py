@@ -27,11 +27,13 @@ import datetime as dt
 import aiosqlite
 from aiogram import Router, F, Bot
 from aiogram.filters import Command
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import (Message, CallbackQuery, InlineKeyboardMarkup,
+                           InlineKeyboardButton, BufferedInputFile)
 from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
 
 import database as db
 import site_analysis as sa
+import report_image as ri
 from config import DB_PATH, ADMIN_IDS
 from sklad_sync import _http_get_blob, _norm
 
@@ -161,6 +163,43 @@ async def send(bot: Bot, thread_id, text: str):
                 return False
         await asyncio.sleep(1.2)  # guruhga daqiqasiga ~20 xabar limiti
     return True
+
+
+async def send_photo(bot: Bot, thread_id, png: bytes, caption: str, filename="sanoq.png"):
+    """Rasm + izoh yuboradi. Qaytaradi: (chat_id, message_id) yoki None."""
+    chat_id = await get_group_chat()
+    if not chat_id:
+        return None
+    for attempt in range(3):
+        try:
+            m = await bot.send_photo(chat_id, BufferedInputFile(png, filename=filename),
+                                     caption=caption, message_thread_id=thread_id or None)
+            return chat_id, m.message_id
+        except TelegramRetryAfter as ex:
+            await asyncio.sleep(ex.retry_after + 1)
+        except TelegramBadRequest as ex:
+            if thread_id and "thread" in str(ex).lower():
+                thread_id = None
+                continue
+            log.error("Guruhga rasm yuborib bo'lmadi: %s", ex)
+            return None
+    return None
+
+
+def _msg_key(site_cid, date_str, time_str):
+    return f"msg:{site_cid}|{date_str}|{time_str}"
+
+
+async def remember_message(site_cid, date_str, time_str, chat_id, message_id):
+    await set_setting(_msg_key(site_cid, date_str, time_str), json.dumps([chat_id, message_id]))
+
+
+async def recall_message(site_cid, date_str, time_str):
+    v = await get_setting(_msg_key(site_cid, date_str, time_str))
+    try:
+        return tuple(json.loads(v)) if v else None
+    except Exception:
+        return None
 
 
 # ===========================================================================
@@ -328,8 +367,18 @@ async def notify_count(bot: Bot, agent_id, agent_name, client_name: str,
         pids = [pmap[_norm(n)] for n in items_by_name if _norm(n) in pmap]
         if site_cid is None or not pids:
             return
-        text = build_count_message(blob, site_cid, pids, when.strftime("%Y-%m-%d"),
-                                   when.strftime("%H:%M"), agent_name)
+        d_str, t_str = when.strftime("%Y-%m-%d"), when.strftime("%H:%M")
+        try:
+            rep = ri.build_report(blob, site_cid, pids, d_str, t_str, agent_name)
+            png = await asyncio.to_thread(ri.render_png, rep)
+            sent = await send_photo(bot, thread, png, ri.build_caption(rep),
+                                    filename=f"sanoq_{d_str}.png")
+            if sent:
+                await remember_message(site_cid, d_str, t_str, *sent)
+                return
+        except Exception:
+            log.exception("Rasm hisobot tayyorlanmadi — matn ko'rinishida yuboriladi")
+        text = build_count_message(blob, site_cid, pids, d_str, t_str, agent_name)
         await send(bot, thread, text)
     except Exception:
         log.exception("Guruhga sanoq xabari yuborilmadi (bot davom etadi)")

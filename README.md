@@ -55,3 +55,24 @@ Ketma-ket ikki sanash orasida tovar qoldig'i:
 - Qarz (to'lov) moduli — joy tayyor.
 - 1C 8.3 OData integratsiyasi.
 - Klent/tovar tahrirlash.
+
+## 🆕 Guruhga avto xabarlar (topiclar bo'yicha)
+Sanoq tugashi bilan bot natijani guruhdagi **o'sha agentning topiciga** yozadi:
+oldi / sotdi / qoldiq, oylik tezlik, **30 qopdan kam** qolganlar, **21+ kun** turib
+qolganlar va shubhali sanoq (qoldiq hisobdan ko'p). Hisob saytdagi bilan 1:1
+(`site_analysis.py` — saytdagi `analyzeClientProduct` nusxasi).
+
+Saytga sotuv kiritilsa (bot har 15 daqiqada tekshiradi) — klentni oxirgi sanagan
+agentning topiciga tushadi, kerak bo'lsa o'sha sanoq natijasini yangilab yozadi.
+Agenti noma'lum klent → General.
+
+**Sozlash (bir marta):** botni guruhga admin qiling → har bir topicda `/topic`
+yozing → agentni tanlang. General'da `/topic` → «🏠 Umumiy».
+Kutmasdan tekshirish: `/sotuv_tekshir`.
+
+**Zaxira ENV (Railway Volume bo'lmasa):** `GROUP_CHAT_ID`, `TOPIC_MAP`
+(bot `/topic` dan keyin tayyor qatorni o'zi beradi), `SALES_CHECK_MIN=15`.
+
+O'zgargan fayllar: `bot.py`, `handlers/agent.py`, `sklad_sync.py`;
+yangi: `group_notify.py`, `site_analysis.py`. Sayt: `index.html` (saqlashdan
+oldin botning yangi yozuvlarini qo'shib oladi — sanoqlar o'chib ketmaydi).
