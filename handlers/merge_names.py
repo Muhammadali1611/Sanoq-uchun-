@@ -39,6 +39,7 @@ MERGE_MAP = [
     ("Dom Nalivnoy",     "Remost Nalivnoy pol 25kg (Suxoy)"),
     ("Dom 22",           "Remost 22 25kg (Suxoy)"),
     ("Dom 07 Rodband",   "Remost 07 rodband 25kg (Suxoy)"),
+    ("Concrete 01 Shpaklovka", "Kreta 01 20kg (Suxoy)"),
 ]
 ARRAYS = ("initialStock", "sales", "counts", "deliveries")
 
@@ -64,7 +65,9 @@ def plan(blob):
             out.append((old, new, None, None, "allaqachon birlashgan"))
             continue
         if pn is None:
-            out.append((old, new, po["id"], None, "yangi nom saytda yo'q — o'tkazib yuboriladi"))
+            # Yangi nom saytda hali yo'q -> eski tovarning NOMI o'zgartiriladi
+            # (tarix joyida qoladi, 1C importi endi shu nom bilan mos tushadi)
+            out.append((old, new, po["id"], "rename", "nomi 1C'dagi nomga o'zgartiriladi"))
             continue
         cnt = {k: sum(1 for r in blob.get(k, []) or []
                       if isinstance(r, dict) and str(r.get("productId")) == str(po["id"]))
@@ -77,8 +80,15 @@ def apply_merge(blob):
     """Blokni joyida o'zgartiradi. Qaytaradi: ko'chirilgan yozuvlar soni (0 bo'lsa None)."""
     moved = 0
     removed = set()
+    renamed = 0
     for old, new, oid, nid, info in plan(blob):
         if oid is None or nid is None:
+            continue
+        if nid == "rename":
+            for pr in blob.get("products", []):
+                if isinstance(pr, dict) and str(pr.get("id")) == str(oid):
+                    pr["name"] = new
+                    renamed += 1
             continue
         for k in ARRAYS:
             for r in blob.get(k, []) or []:
@@ -87,7 +97,7 @@ def apply_merge(blob):
                     moved += 1
         removed.add(str(oid))
     if not removed:
-        return None
+        return moved + renamed or None
     blob["products"] = [p for p in blob.get("products", [])
                         if not (isinstance(p, dict) and str(p.get("id")) in removed)]
     return moved
@@ -115,7 +125,7 @@ async def merge_cmd(message: Message):
         await message.answer(f"Saytga ulanib bo'lmadi: {e(ex)}")
         return
     rows = plan(blob)
-    todo = [r for r in rows if not isinstance(r[4], str)]
+    todo = [r for r in rows if not isinstance(r[4], str) or r[3] == "rename"]
     text = "🔁 <b>Tovar nomlarini birlashtirish</b>\n\n" + _fmt_plan(rows)
     if not todo:
         await message.answer(text + "\n\n✅ Birlashtiriladigan narsa qolmagan.")
