@@ -5,12 +5,18 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
+import asyncio
+import logging
+
 import database as db
+import group_notify
+import site_analysis as sa
 import sklad_sync  # sayt (CP Sklad) bilan sinxronizatsiya
 import keyboards as kb
 from states import Counting
 
 router = Router()
+_BG = set()  # fon vazifalari (guruhga xabar) — GC yig'ib ketmasligi uchun
 
 
 async def _can_count(user_id):
@@ -160,7 +166,7 @@ async def count_done(call: CallbackQuery, state: FSMContext):
         await call.answer("Hech narsa sanamadingiz", show_alert=True)
         return
     client_id = data["client_id"]
-    today = dt.date.today().strftime("%Y-%m-%d")
+    today = sa.today()  # Toshkent sanasi (server UTC bo'lsa ham)
 
     # Oldingi sanash (taqqoslash uchun) — yangisini saqlashdan oldin olamiz
     prev = await db.get_last_session_for_client(client_id)
@@ -169,21 +175,33 @@ async def count_done(call: CallbackQuery, state: FSMContext):
     for pid, qty in items.items():
         await db.add_count_item(count_id, pid, qty)
 
-    # --- CP Sklad (sayt) ga sinxronlash ---------------------------------
+    # --- CP Sklad (sayt) ga sinxronlash + guruhga xabar -----------------
     # Bot ID -> sayt NOM: sync moduli nom bo'yicha bog'laydi.
+    me = await db.get_user(call.from_user.id)
+    agent_name = (me or {}).get("full_name") or call.from_user.full_name
+    when = sa.uz_now()
+    _items_by_name = {}
+    _errs = []
     try:
-        _items_by_name = {}
         for _pid, _qty in items.items():
             _p = await db.get_product(_pid)
             if _p:
                 _items_by_name[_p["name"]] = _qty
-        _added, _errs = await sklad_sync.push_count(data["client_name"], _items_by_name)
+        _added, _errs = await sklad_sync.push_count(
+            data["client_name"], _items_by_name,
+            agent_id=call.from_user.id, agent_name=agent_name, when=when)
         if _errs:
-            import logging
             logging.getLogger("sklad_sync").warning("Sayt sync ogohlantirish: %s", _errs)
     except Exception:
-        import logging
         logging.getLogger("sklad_sync").exception("Sayt sync xatosi (bot davom etadi)")
+        _errs = ["Xato: sayt bilan sinxronlashda xato"]
+
+    # Guruhga — fonda (agent kutib qolmaydi)
+    _t = asyncio.create_task(group_notify.notify_count(
+        call.bot, call.from_user.id, agent_name, data["client_name"],
+        _items_by_name, when, _errs))
+    _BG.add(_t)
+    _t.add_done_callback(_BG.discard)
     # --------------------------------------------------------------------
 
     lines = [f"✅ <b>{data['client_name']}</b> sanaldi ({today})\n"]
