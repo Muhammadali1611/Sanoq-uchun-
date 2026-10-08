@@ -116,7 +116,14 @@ def _detect_pk(row):
 # ---------------------------------------------------------------------------
 # Asosiy ish (bloklovchi) — push_count_blocking
 # ---------------------------------------------------------------------------
-def push_count_blocking(client_name: str, items_by_name: dict):
+def _uz_now():
+    """O'zbekiston vaqti (UTC+5). Railway serveri UTC'da ishlaydi — sayt esa
+    Toshkent vaqtini ishlatadi, shuning uchun vaqtni shu yerda to'g'rilaymiz."""
+    return dt.datetime.utcnow() + dt.timedelta(hours=5)
+
+
+def push_count_blocking(client_name: str, items_by_name: dict,
+                        agent_id=None, agent_name=None, when=None):
     """
     client_name      : bot'dagi mijoz nomi (masalan "Axadjon aka Bo'z")
     items_by_name    : { tovar_nomi(bot) : qty }  masalan {"Biora 01 Shpaklovka": 34}
@@ -133,7 +140,14 @@ def push_count_blocking(client_name: str, items_by_name: dict):
     clients  = blob.get("clients", [])
     products = blob.get("products", [])
     counts   = blob.get("counts", [])
-    seq      = int(blob.get("seq", 0))
+    # Saytda `seq` = KEYINGI bo'sh id (nextId(){return DB.seq++}).
+    # Takroriy id bo'lmasligi uchun mavjud eng katta id'dan ham kattaroq olamiz.
+    _max_id = 0
+    for _k in ("initialStock", "sales", "counts"):
+        for _r in blob.get(_k, []) or []:
+            if isinstance(_r, dict) and isinstance(_r.get("id"), (int, float)):
+                _max_id = max(_max_id, int(_r["id"]))
+    seq      = max(int(blob.get("seq", 1) or 1), _max_id + 1)
 
     # 2) NOM -> ID xaritalari
     client_map  = {_norm(c.get("name")): c.get("id") for c in clients if isinstance(c, dict)}
@@ -147,7 +161,7 @@ def push_count_blocking(client_name: str, items_by_name: dict):
         # mijoz topilmasa — umuman yozmaymiz
         return 0, errors
 
-    now = dt.datetime.now()
+    now = when or _uz_now()
     date_str = now.strftime("%Y-%m-%d")
     time_str = now.strftime("%H:%M")
 
@@ -157,15 +171,22 @@ def push_count_blocking(client_name: str, items_by_name: dict):
         if pid is None:
             errors.append(f"TOVAR topilmadi (sayt): '{pname}' — o'tkazib yuborildi")
             continue
-        seq += 1
-        new_rows.append({
+        row_new = {
             "id": seq,
             "qty": qty,
             "date": date_str,
             "time": time_str,
             "clientId": site_client_id,
             "productId": pid,
-        })
+        }
+        # Kim sanagani — guruhda sotuvni to'g'ri agent topiciga yuborish uchun.
+        # Sayt bu maydonlarni e'tiborsiz qoldiradi (hisobga ta'sir qilmaydi).
+        if agent_id is not None:
+            row_new["agentId"] = agent_id
+        if agent_name:
+            row_new["agent"] = agent_name
+        new_rows.append(row_new)
+        seq += 1
 
     if not new_rows:
         return 0, errors
@@ -184,7 +205,8 @@ def push_count_blocking(client_name: str, items_by_name: dict):
 # ---------------------------------------------------------------------------
 # Async o'ram — botdan (aiogram) shu chaqiriladi
 # ---------------------------------------------------------------------------
-async def push_count(client_name: str, items_by_name: dict):
+async def push_count(client_name: str, items_by_name: dict,
+                     agent_id=None, agent_name=None, when=None):
     """
     Async o'ram. Bloklovchi HTTP ni alohida threadda ishlatadi —
     bot event-loop'ini bloklamaydi.
@@ -194,7 +216,8 @@ async def push_count(client_name: str, items_by_name: dict):
     """
     try:
         added, errors = await asyncio.to_thread(
-            push_count_blocking, client_name, items_by_name
+            push_count_blocking, client_name, items_by_name,
+            agent_id, agent_name, when
         )
         if errors:
             for e in errors:
