@@ -13,6 +13,7 @@ import config
 import database as db
 from handlers import common, admin, agent, reports
 import import_from_site  # saytdan tiklash buyrug'i
+import group_notify      # guruhga avto xabarlar (topiclar)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)s | %(message)s")
@@ -23,6 +24,7 @@ async def main():
         raise SystemExit("BOT_TOKEN topilmadi! .env faylga BOT_TOKEN yozing.")
 
     await db.init_db()
+    await group_notify.init()
 
     bot = Bot(
         token=config.BOT_TOKEN,
@@ -31,6 +33,7 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
 
     # Routerlar (tartib muhim: maxsus -> umumiy)
+    dp.include_router(group_notify.router)   # /topic, /sotuv_tekshir (guruh)
     dp.include_router(agent.router)
     dp.include_router(import_from_site.router)
     dp.include_router(reports.router)
@@ -42,7 +45,13 @@ async def main():
     if config.ADMIN_IDS:
         logging.info("Adminlar: %s", config.ADMIN_IDS)
 
-    await dp.start_polling(bot)
+    # Saytga kiritilgan yangi sotuvlarni kuzatish (har SALES_CHECK_MIN daqiqa)
+    watcher = asyncio.create_task(group_notify.sales_watcher(bot))
+
+    try:
+        await dp.start_polling(bot)
+    finally:
+        watcher.cancel()
 
 
 if __name__ == "__main__":
