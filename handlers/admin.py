@@ -3,12 +3,38 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
+import html
+import logging
+
 import catalog_sync
+import count_sync
 import database as db
+import site_analysis as sa
 import keyboards as kb
 from states import AddUser, AddClient, AddProduct, DelClient, EditCount
 
 router = Router()
+log = logging.getLogger("admin")
+
+
+async def _bot_session(count_id):
+    """Botdagi sanoq: (info, [(tovar, son), ...]) yoki (None, [])."""
+    info = await db.get_count_by_id(count_id)
+    if not info:
+        return None, []
+    for s in await db.get_client_recent_counts(info["client_id"], limit=50):
+        if s["id"] == count_id:
+            return info, [(it["product_name"], float(it["quantity"])) for it in s["items"]]
+    return info, []
+
+
+async def _site_ref(info, items):
+    try:
+        return await count_sync.find_site_session(
+            info["client_name"], info["count_date"], items, info.get("agent_id"))
+    except Exception:
+        log.exception("saytdagi mos sanoq qidirilmadi")
+        return "err"
 
 
 async def _role(user_id):
@@ -416,10 +442,32 @@ async def edit_delete_confirm(call: CallbackQuery):
 @router.callback_query(F.data.startswith("editdel:yes:"))
 async def edit_delete_yes(call: CallbackQuery, state: FSMContext):
     count_id = int(call.data.split(":")[2])
+    await call.answer("O'chirilyapti...")
+    info, items = await _bot_session(count_id)
+    site_txt, grp_txt = "— (saytda topilmadi)", "—"
+    if info:
+        ref = await _site_ref(info, items)
+        if ref == "err":
+            await state.clear()
+            await call.message.edit_text(
+                "❌ Saytga ulanib bo'lmadi — hech narsa o'chirilmadi. Birozdan keyin qayta urinib ko'ring.")
+            return
+        if ref:
+            site_cid, t = ref
+            try:
+                n = await count_sync.delete_site_session(site_cid, info["count_date"], t)
+                site_txt = f"{n} ta yozuv o'chirildi"
+            except Exception:
+                log.exception("saytdan o'chirilmadi")
+                await state.clear()
+                await call.message.edit_text(
+                    "❌ Saytdan o'chirib bo'lmadi — hech narsa o'chirilmadi. Qayta urinib ko'ring.")
+                return
+            grp_txt = await count_sync.delete_group_report(call.bot, site_cid, info["count_date"], t)
     await db.delete_count(count_id)
     await state.clear()
-    await call.message.edit_text("🗑 Sanash o'chirildi.")
-    await call.answer("O'chirildi")
+    await call.message.edit_text(
+        f"🗑 Sanash o'chirildi.\n\n• Bot: ✅\n• Sayt: {site_txt}\n• Guruh: {grp_txt}")
 
 
 @router.callback_query(F.data.startswith("editdel:no:"))
@@ -471,11 +519,33 @@ async def edit_enter_qty(message: Message, state: FSMContext):
         await message.answer("Faqat raqam yozing.")
         return
     data = await state.get_data()
-    await db.update_count_item(data["edit_count_id"], data["edit_product_id"], qty)
     p = await db.get_product(data["edit_product_id"])
+    info, items = await _bot_session(data["edit_count_id"])
+    old_qty = next((q for n, q in items if n == p["name"]), None)
+    ref = await _site_ref(info, items) if info else None
+    if ref == "err":
+        await message.answer("❌ Saytga ulanib bo'lmadi — hech narsa o'zgarmadi. "
+                             "Birozdan keyin qayta yozib ko'ring.")
+        return
+    site_txt = "— (saytda topilmadi)"
+    if ref:
+        site_cid, t = ref
+        try:
+            n = await count_sync.update_site_qty(site_cid, info["count_date"], t, p["name"], qty)
+            site_txt = "✅" if n else "— (bu tovar saytdagi sanoqda yo'q)"
+        except Exception:
+            log.exception("saytda tuzatilmadi")
+            await message.answer("❌ Saytda tuzatib bo'lmadi — hech narsa o'zgarmadi. Qayta urinib ko'ring.")
+            return
+        if n:
+            await count_sync.note_group_report(
+                message.bot, site_cid, info["count_date"], t,
+                f"✏️ Tuzatildi: <b>{html.escape(p['name'])}</b> — "
+                f"{sa.fmt1(old_qty) if old_qty is not None else '?'} → <b>{sa.fmt1(qty)}</b> {p['unit']}")
+    await db.update_count_item(data["edit_count_id"], data["edit_product_id"], qty)
     role = await _role(message.from_user.id)
     await state.clear()
     await message.answer(
-        f"✅ Tuzatildi: <b>{p['name']}</b> → {qty:g} {p['unit']}",
+        f"✅ Tuzatildi: <b>{p['name']}</b> → {qty:g} {p['unit']}\n• Sayt: {site_txt}",
         reply_markup=kb.main_menu(role),
     )
