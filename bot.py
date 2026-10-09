@@ -16,6 +16,7 @@ import import_from_site  # saytdan tiklash buyrug'i
 import group_notify      # guruhga avto xabarlar (topiclar)
 import bot_state         # xodimlar/sozlamalar zaxirasi (Supabase)
 import catalog_sync      # tovar/klent ro'yxati saytdan
+import agent_topics      # agent -> o'z topici (avtomatik)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)s | %(message)s")
@@ -29,6 +30,10 @@ async def main():
     await group_notify.init()
     await bot_state.restore()   # xodimlar + guruh sozlamalari Supabase'dan
     try:
+        await agent_topics.seed()   # Abduqodir/Muhammadamin -> o'z topiclari (bir marta)
+    except Exception:
+        logging.exception("agent/topic boshlang'ich sozlash xatosi")
+    try:
         await catalog_sync.sync_from_site()   # tovar/klentlar — saytdagi nomlar bilan
     except Exception:
         logging.exception("Katalog saytdan olinmadi (eski ro'yxat bilan davom etiladi)")
@@ -38,6 +43,7 @@ async def main():
         default=DefaultBotProperties(parse_mode="HTML"),
     )
     dp = Dispatcher(storage=MemoryStorage())
+    dp.message.outer_middleware(agent_topics.TopicLearner())   # topic nomlarini o'rganadi
 
     # Routerlar (tartib muhim: maxsus -> umumiy)
     dp.include_router(group_notify.router)   # /topic, /sotuv_tekshir (guruh)

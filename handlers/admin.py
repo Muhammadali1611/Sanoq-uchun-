@@ -6,6 +6,7 @@ from aiogram.types import Message, CallbackQuery
 import html
 import logging
 
+import agent_topics
 import catalog_sync
 import count_sync
 import database as db
@@ -15,6 +16,27 @@ from states import AddUser, AddClient, AddProduct, DelClient, EditCount
 
 router = Router()
 log = logging.getLogger("admin")
+
+
+async def _topic_note(uid, name, role):
+    if role != "agent":
+        return ""
+    try:
+        t = await agent_topics.auto_assign(uid, name)
+    except Exception:
+        log.exception("topic avtomatik ulanmadi")
+        t = None
+    if t:
+        return f"\n📌 Guruhdagi «{html.escape(t)}» topiciga avtomatik ulandi."
+    if (await gn_topic_map()).get(int(uid)):
+        return ""
+    return ("\n⚠️ Mos topic topilmadi — guruhda uning topiciga kirib /topic yozing "
+            "va shu agentni tanlang.")
+
+
+async def gn_topic_map():
+    import group_notify
+    return await group_notify.get_topic_map()
 
 
 async def _bot_session(count_id):
@@ -67,7 +89,8 @@ async def approve_user(call: CallbackQuery):
         name = "Foydalanuvchi"
     await db.add_user(uid, name, role, added_by=call.from_user.id)
     role_uz = "Agent" if role == "agent" else "Menejer"
-    await call.message.edit_text(f"✅ {name} — {role_uz} sifatida qo'shildi.")
+    await call.message.edit_text(f"✅ {name} — {role_uz} sifatida qo'shildi."
+                                 + await _topic_note(uid, name, role))
     try:
         await call.bot.send_message(
             uid, f"✅ Siz {role_uz} sifatida ro'yxatga olindingiz!",
@@ -124,7 +147,8 @@ async def add_user_name(message: Message, state: FSMContext):
                       added_by=message.from_user.id)
     role_uz = "Agent" if data["new_role"] == "agent" else "Menejer"
     await state.clear()
-    await message.answer(f"✅ {message.text.strip()} — {role_uz} qo'shildi.",
+    note = await _topic_note(data["new_id"], message.text.strip(), data["new_role"])
+    await message.answer(f"✅ {message.text.strip()} — {role_uz} qo'shildi." + note,
                          reply_markup=kb.main_menu("admin"))
     try:
         await message.bot.send_message(
