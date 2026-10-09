@@ -15,6 +15,7 @@ Qayta ishlatilsa — allaqachon birlashganlarini o'tkazib yuboradi.
 Yangi juftlik kerak bo'lsa — MERGE_MAP ga qo'shing.
 """
 import asyncio
+import copy
 import html
 import logging
 
@@ -35,7 +36,10 @@ log = logging.getLogger("merge_names")
 MERGE_MAP = [
     ("Concrete 75",      "Kreta 75 Uselinniy 25kg (Suxoy)"),
     ("Concrete Rodband", "Kreta Rodband 25 kg"),
-    ("Dom Oq fasad",     "ForGips Oq fasad 20kg"),
+    # 1C nomga "(Suxoy)" qo'shildi — avval mavjud tovar nomi yangilanadi,
+    # keyin eski Dom Oq fasad unga birlashadi (tartib muhim!)
+    ("ForGips Oq fasad 20kg", "ForGips Oq fasad 20kg (Suxoy)"),
+    ("Dom Oq fasad",     "ForGips Oq fasad 20kg (Suxoy)"),
     ("Dom Nalivnoy",     "Remost Nalivnoy pol 25kg (Suxoy)"),
     ("Dom 22",           "Remost 22 25kg (Suxoy)"),
     ("Dom 07 Rodband",   "Remost 07 rodband 25kg (Suxoy)"),
@@ -55,52 +59,42 @@ async def _is_admin(uid):
     return bool(u and u["role"] == "admin")
 
 
-def plan(blob):
-    """Har juftlik: (eski, yangi, eski_id, yangi_id, {massiv: soni}) yoki holat matni."""
+def _step(blob, old, new):
+    """Bitta juftlikni blokka qo'llaydi. Qaytaradi: (qator_tavsifi, ko'chgan_soni)."""
     by_name = {_norm(p.get("name")): p for p in blob.get("products", []) if isinstance(p, dict)}
-    out = []
-    for old, new in MERGE_MAP:
-        po, pn = by_name.get(_norm(old)), by_name.get(_norm(new))
-        if po is None:
-            out.append((old, new, None, None, "allaqachon birlashgan"))
-            continue
-        if pn is None:
-            # Yangi nom saytda hali yo'q -> eski tovarning NOMI o'zgartiriladi
-            # (tarix joyida qoladi, 1C importi endi shu nom bilan mos tushadi)
-            out.append((old, new, po["id"], "rename", "nomi 1C'dagi nomga o'zgartiriladi"))
-            continue
-        cnt = {k: sum(1 for r in blob.get(k, []) or []
-                      if isinstance(r, dict) and str(r.get("productId")) == str(po["id"]))
-               for k in ARRAYS}
-        out.append((old, new, po["id"], pn["id"], cnt))
-    return out
+    po, pn = by_name.get(_norm(old)), by_name.get(_norm(new))
+    if po is None:
+        return (old, new, None, None, "allaqachon bajarilgan"), 0
+    if pn is None:
+        # Yangi nom saytda hali yo'q -> eski tovarning NOMI o'zgartiriladi
+        # (tarix joyida qoladi, 1C importi endi shu nom bilan mos tushadi)
+        po["name"] = new
+        return (old, new, po["id"], "rename", "nomi 1C'dagi nomga o'zgartiriladi"), 1
+    cnt = {k: 0 for k in ARRAYS}
+    for k in ARRAYS:
+        for r in blob.get(k, []) or []:
+            if isinstance(r, dict) and str(r.get("productId")) == str(po["id"]):
+                r["productId"] = pn["id"]
+                cnt[k] += 1
+    blob["products"] = [p for p in blob.get("products", []) if p is not po]
+    return (old, new, po["id"], pn["id"], cnt), sum(cnt.values())
+
+
+def plan(blob):
+    """Oldindan ko'rish: nusxada ketma-ket bajarib, nima bo'lishini qaytaradi."""
+    work = copy.deepcopy(blob)
+    return [_step(work, old, new)[0] for old, new in MERGE_MAP]
 
 
 def apply_merge(blob):
-    """Blokni joyida o'zgartiradi. Qaytaradi: ko'chirilgan yozuvlar soni (0 bo'lsa None)."""
-    moved = 0
-    removed = set()
-    renamed = 0
-    for old, new, oid, nid, info in plan(blob):
-        if oid is None or nid is None:
-            continue
-        if nid == "rename":
-            for pr in blob.get("products", []):
-                if isinstance(pr, dict) and str(pr.get("id")) == str(oid):
-                    pr["name"] = new
-                    renamed += 1
-            continue
-        for k in ARRAYS:
-            for r in blob.get(k, []) or []:
-                if isinstance(r, dict) and str(r.get("productId")) == str(oid):
-                    r["productId"] = nid
-                    moved += 1
-        removed.add(str(oid))
-    if not removed:
-        return moved + renamed or None
-    blob["products"] = [p for p in blob.get("products", [])
-                        if not (isinstance(p, dict) and str(p.get("id")) in removed)]
-    return moved
+    """Blokni joyida, juftliklarni TARTIB bilan o'zgartiradi.
+    Qaytaradi: o'zgargan yozuvlar soni (hech narsa bo'lmasa None)."""
+    total, changed = 0, False
+    for old, new in MERGE_MAP:
+        row, n = _step(blob, old, new)
+        total += n
+        changed = changed or row[2] is not None
+    return total if changed else None
 
 
 def _fmt_plan(rows):
