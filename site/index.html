@@ -173,7 +173,7 @@ async function cloudSet(data){if(!CLOUD_ON)return false;
 
 async function loadDB(){let s=null,fromCloud=false;
   const cloud=await cloudGet();
-  if(cloud){s=cloud;fromCloud=true;BASE_SEQ=(cloud.seq||1);try{await idbSet('data',s);}catch(e){}setCloudStatus('on');}
+  if(cloud){s=cloud;fromCloud=true;snapBase(cloud);try{await idbSet('data',s);}catch(e){}setCloudStatus('on');}
   else{try{s=await idbGet('data');}catch(e){}setCloudStatus('off');}
   if(s)DB=s;
   else{DB={clients:PRELOAD.clients,products:PRELOAD.products,initialStock:[],sales:[],counts:[],seq:1};}
@@ -184,37 +184,103 @@ async function loadDB(){let s=null,fromCloud=false;
   const hasReal=(DB.initialStock.length||DB.sales.length||DB.counts.length)>0;
   if(CLOUD_ON && !fromCloud && hasReal){await saveDB();}}
 
-// ===== HIMOYA: botning yangi yozuvlari o'chib ketmasligi uchun =====
-// Sayt butun bazani bitta blok qilib saqlaydi. Sahifa ochilgandan keyin bot
-// sanoq qo'shgan bo'lsa, eski nusxa bilan saqlash ularni o'chirib yuborardi.
-// Endi saqlashdan oldin bulutni qayta o'qib, shu orada qo'shilgan YANGI
-// yozuvlarni (id >= BASE_SEQ) o'zimiznikiga qo'shamiz. O'zimiz o'chirgan
-// eski yozuvlar qaytib kelmaydi (ularning id < BASE_SEQ).
+// ===== HIMOYA: sayt + bot bitta bazada ishlaydi (3 tomonlama birlashtirish) =====
+// Sayt butun bazani bitta blok qilib saqlaydi. Sahifa ochiq turganda bot sanoq
+// qo'shishi, o'chirishi yoki sonini tuzatishi mumkin. Saqlashdan oldin bulutni
+// qayta o'qiymiz va oxirgi sinxron holat (BASE) bilan solishtiramiz:
+//   • bulutda yangi paydo bo'lgan yozuv  -> bizga qo'shiladi
+//   • bulutda o'chirilgan (biz tegmagan)  -> bizda ham o'chadi (qaytib tirilmaydi)
+//   • bulutda o'zgargan (biz tegmagan)    -> bulutdagi versiya olinadi
+//   • biz o'chirgan/o'zgartirgan          -> bizniki qoladi
 let BASE_SEQ=null;   // bulut bilan oxirgi sinxronlangan paytdagi seq
+let BASE=null;       // {massiv: Map(id -> imzo)} — oxirgi sinxron holat
+const SYNC_KEYS=['clients','products','initialStock','sales','counts','deliveries'];
+function _canon(x){if(Array.isArray(x))return '['+x.map(_canon).join(',')+']';
+  if(x&&typeof x==='object')return '{'+Object.keys(x).sort().map(k=>JSON.stringify(k)+':'+_canon(x[k])).join(',')+'}';
+  return JSON.stringify(x);}
 function _recSig(x){return [x.id,x.clientId,x.productId,x.date,x.time||'',x.qty].join('|');}
-function mergeCloudNew(cloud){
-  if(!cloud||BASE_SEQ===null)return 0;let added=0;
-  ['initialStock','sales','counts'].forEach(k=>{
-    const local=DB[k]||(DB[k]=[]);const cl=cloud[k]||[];
-    const sigs=new Set(local.map(_recSig)),ids=new Set(local.map(x=>x.id));
-    cl.forEach(x=>{if(!x||typeof x.id!=='number'||x.id<BASE_SEQ||sigs.has(_recSig(x)))return;
-      const y={...x};if(ids.has(y.id))y.id=nextId();     // id to'qnashsa — yangi id
-      local.push(y);ids.add(y.id);sigs.add(_recSig(y));added++;});
-  });
+function _hasId(x){return x&&(typeof x.id==='number'||typeof x.id==='string')&&x.id!=='';}
+function snapBase(src){BASE={};SYNC_KEYS.forEach(k=>{const m=new Map();
+  (src&&src[k]||[]).forEach(x=>{if(_hasId(x))m.set(String(x.id),_canon(x));});BASE[k]=m;});
+  BASE_SEQ=(src&&src.seq)||1;}
+function mergeCloud(cloud){
+  const st={added:0,removed:0,updated:0};
+  if(!cloud||!BASE)return st;
+  SYNC_KEYS.forEach(k=>{
+    if(!Array.isArray(cloud[k])&&!Array.isArray(DB[k]))return;
+    const base=BASE[k]||new Map(),local=DB[k]||(DB[k]=[]),cl=cloud[k]||[];
+    const cmap=new Map();cl.forEach(x=>{if(_hasId(x))cmap.set(String(x.id),x);});
+    const isRec=!(k==='clients'||k==='products');
+    const out=[],seen=new Set();
+    local.forEach(x=>{
+      if(!_hasId(x)){out.push(x);return;}
+      const id=String(x.id),b=base.get(id),c=cmap.get(id);seen.add(id);
+      if(b!==undefined&&c===undefined){
+        if(_canon(x)===b){st.removed++;return;}   // boshqa joyda o'chirilgan -> o'chiramiz
+        out.push(x);return;}                      // biz o'zgartirganmiz -> qoldiramiz
+      if(b!==undefined&&c!==undefined&&_canon(x)===b&&_canon(c)!==b){out.push({...c});st.updated++;return;}
+      out.push(x);});
+    // bulutda yangi paydo bo'lganlar
+    const ids=new Set(out.filter(_hasId).map(x=>String(x.id)));
+    const sigs=isRec?new Set(out.map(_recSig)):null;
+    cl.forEach(x=>{if(!_hasId(x))return;const id=String(x.id);
+      if(base.has(id))return;                          // eski yozuv: yuqorida hal qilindi
+      if(isRec&&sigs.has(_recSig(x)))return;            // aynan shu yozuv bizda bor
+      if(seen.has(id)){const mine=out.find(z=>String(z.id)===id);
+        if(mine&&_canon(mine)===_canon(x))return;}      // bir xil — hech narsa qilmaymiz
+      const y={...x};
+      if(ids.has(id)){
+        if(isRec)y.id=nextId();                        // id to'qnashsa — yangi id
+        else{ // bizda yangi qo'shilgan klent/tovar bilan id to'qnashdi -> biznikiga yangi id
+          const mine=out.find(z=>String(z.id)===id);
+          const nid=Math.max(0,...out.map(z=>+z.id||0),...cl.map(z=>+z.id||0))+1;
+          const ref=k==='clients'?'clientId':'productId';
+          ['initialStock','sales','counts','deliveries'].forEach(r=>(DB[r]||[]).forEach(z=>{if(String(z[ref])===id)z[ref]=nid;}));
+          mine.id=nid;ids.add(String(nid));}}
+      out.push(y);ids.add(String(y.id));if(isRec)sigs.add(_recSig(y));st.added++;});
+    DB[k]=out;});
   if((cloud.seq||0)>DB.seq)DB.seq=cloud.seq;
-  return added;}
+  return st;}
+function _mergeToast(st,pref){const p=[];
+  if(st.added)p.push(st.added+' ta yangi');if(st.removed)p.push(st.removed+' ta o\'chirilgan');
+  if(st.updated)p.push(st.updated+' ta tuzatilgan');
+  if(p.length)toast((pref||'Bot/boshqa oynadan: ')+p.join(', '));}
 
-async function saveDB(opts){opts=opts||{};
+let _saving=0;
+async function saveDB(opts){opts=opts||{};_saving++;try{
   if(CLOUD_ON&&!opts.noMerge){const cloud=await cloudGet();
-    const n=mergeCloudNew(cloud);if(n>0)toast('Botdan '+n+' ta yangi yozuv qo\'shildi');}
+    _mergeToast(mergeCloud(cloud));}
   try{await idbSet('data',DB);}catch(e){}              // lokal — darhol
   if(CLOUD_ON){const ok=await cloudSet(DB);setCloudStatus(ok?'on':'off');
-    if(ok)BASE_SEQ=DB.seq;
-    if(!ok)toast('Bulutga saqlanmadi (lokal saqlandi)');}}
+    if(ok)snapBase(DB);
+    if(!ok)toast('Bulutga saqlanmadi (lokal saqlandi)');}
+  }finally{_saving--;}}
+
+// ===== AVTO-YANGILASH: bot qo'shgan/o'chirgan narsalar F5'siz ko'rinadi =====
+let _autoBusy=false,_pendingRender=false;
+function _userBusy(){
+  if(document.querySelector('#modalHost *'))return true;
+  const a=document.activeElement;if(a&&/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName))return true;
+  if((typeof IMPORT_ROWS!=='undefined'&&IMPORT_ROWS.length)||(typeof IMPORT_1C_ROWS!=='undefined'&&IMPORT_1C_ROWS.length))return true;
+  // jadvalga raqam yozib, hali saqlamagan bo'lsa
+  return [...document.querySelectorAll('main input[type=number], #app input[type=number]')].some(i=>i.value!=='');}
+async function autoSync(){
+  if(!CLOUD_ON||_autoBusy||_saving||document.hidden||!BASE)return;_autoBusy=true;
+  try{const cloud=await cloudGet();if(!cloud){setCloudStatus('off');return;}
+    setCloudStatus('on');
+    const st=mergeCloud(cloud);snapBase(cloud);
+    // biz saqlamagan lokal o'zgarish bo'lmasa, BASE = bulut
+    if(st.added||st.removed||st.updated){try{await idbSet('data',DB);}catch(e){}
+      if(_userBusy())_pendingRender=true;else{render();_mergeToast(st,'Yangilandi: ');}}
+    else if(_pendingRender&&!_userBusy()){_pendingRender=false;render();}
+  }finally{_autoBusy=false;}}
+setInterval(autoSync,60000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)autoSync();});
+window.addEventListener('focus',()=>autoSync());
 
 async function refreshFromCloud(){if(!CLOUD_ON){toast('Bulut ulanmagan');return;}
   setCloudStatus('idle');const cloud=await cloudGet();
-  if(cloud){DB=cloud;BASE_SEQ=(cloud.seq||1);DB.initialStock=DB.initialStock||[];DB.sales=DB.sales||[];DB.counts=DB.counts||[];DB.seq=DB.seq||1;
+  if(cloud){DB=cloud;snapBase(cloud);DB.initialStock=DB.initialStock||[];DB.sales=DB.sales||[];DB.counts=DB.counts||[];DB.seq=DB.seq||1;
     try{await idbSet('data',DB);}catch(e){}setCloudStatus('on');render();toast('Bulutdan yangilandi');}
   else{setCloudStatus('off');toast('Bulutdan o\'qib bo\'lmadi');}}
 
