@@ -2,8 +2,7 @@
 """
 product_order.py — TOVARLAR TARTIBI (segment bo'yicha) VA QISQA NOM
 ==================================================================
-Tartib: KRETA -> CONCRETE -> BIORA -> DOM -> STANDART -> REMOST -> qolganlar
-(Evromix, ForGips ...). Segment ichida raqam bo'yicha:
+Tartib: KRETA -> CONCRETE -> BIORA -> DOM -> REMOST -> ForGips -> EVROMIX -> STANDART. Segment ichida raqam bo'yicha:
 01, 03, 07, 21, 22, 75, 77, keyin Rodband, Nalivnoy ...
 
 Botdagi tovar tugmalari, guruhdagi hisobot jadvali va matn — hammasi shu tartibda.
@@ -15,10 +14,10 @@ SEGMENTS = [
     ("concrete",),
     ("biora",),
     ("dom",),
-    ("standart", "standard"),
     ("remost",),
-    ("evromix", "evro mix", "evro"),
     ("forgips", "for gips"),
+    ("evromix", "evro mix", "evro"),
+    ("standart", "standard"),
 ]
 
 

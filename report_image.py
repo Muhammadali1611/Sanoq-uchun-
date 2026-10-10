@@ -87,7 +87,7 @@ def build_report(blob, site_client_id, product_ids, date_str, time_str,
             "is_low": is_low, "is_stuck": is_stuck, "is_susp": is_susp,
         })
 
-    # Segment tartibida: Kreta -> Concrete -> Biora -> Dom -> Standart -> Remost -> ...
+    # Segment tartibida: product_order.SEGMENTS
     rows.sort(key=lambda r: product_order.sort_key(r["full_name"]))
 
     # Asosiy davr: ko'p mahsulotda uchraydigan oldingi sana
