@@ -34,6 +34,7 @@ from aiogram.exceptions import TelegramRetryAfter, TelegramBadRequest
 import database as db
 import site_analysis as sa
 import report_image as ri
+import product_order as po
 from config import DB_PATH, ADMIN_IDS
 from sklad_sync import _http_get_blob, _norm
 
@@ -279,9 +280,10 @@ def build_count_message(blob, site_client_id, product_ids, date_str, time_str,
 
     low, stuck, suspicious = [], [], []
     total_value = 0.0
-    for pid in product_ids:
+    for pid in sorted(dict.fromkeys(product_ids),
+                      key=lambda x: po.sort_key(str(products.get(str(x), {}).get("name", x)))):
         p = products.get(str(pid), {})
-        name, unit = e(p.get("name", pid)), _unit(p)
+        name, unit = e(po.short_name(str(p.get("name", pid)))), _unit(p)
         a = sa.analyze_client_product(blob, site_client_id, pid, today_str=today_str)
         st = sa.status_of(a)
         cur = a["current"]
@@ -332,16 +334,17 @@ def build_count_message(blob, site_client_id, product_ids, date_str, time_str,
 
     if low:
         lines.append("")
-        lines.append(f"⚠️ <b>{sa.LOW_STOCK} tadan kam qoldi:</b> " + ", ".join(low))
+        lines.append(f"⚠️ <b>{sa.LOW_STOCK} tadan kam qoldi ({len(low)} ta):</b>")
+        lines += [f"   • {x}" for x in low]
         lines.append("👉 Akaga yuk taklif qilish kerak!")
     if stuck:
         lines.append("")
-        lines.append(f"🔴 <b>Turib qolgan ({sa.STUCK_DAYS}+ kun sotilmagan):</b> " + ", ".join(stuck))
+        lines.append(f"🔴 <b>Turib qolgan ({sa.STUCK_DAYS}+ kun sotilmagan):</b>")
+        lines += [f"   • {x}" for x in stuck]
     if suspicious:
         lines.append("")
-        lines.append("❗ <b>Tekshiring:</b> " + ", ".join(
-            f"{n} (+{sa.fmt1(q)})" for n, q in suspicious)
-            + " — qoldiq hisobdagidan ko'p chiqdi.")
+        lines.append("❗ <b>Qayta sanang:</b>")
+        lines += [f"   • {n} — hisobdan +{sa.fmt1(q)} ko'p" for n, q in suspicious]
         if date_str >= today_str:
             lines.append("⏳ Bugun yuk berilgan bo'lsa — ertaga sotuv saytga kiritilgach "
                          "natija avtomatik yangilanadi. Aks holda qayta sanash kerak.")
@@ -433,17 +436,18 @@ def build_sales_block(blob_before, blob_after, site_client_id, new_sales):
     client = clients.get(str(site_client_id), {})
     lines = [f"🏬 <b>{e(client.get('name', site_client_id))}</b>"
              + (f" — {e(client['region'])}" if client.get("region") else "")]
-    for s in sorted(new_sales, key=lambda r: (str(r.get("date")), str(r.get("productId")))):
+    _pn = lambda pid: str(products.get(str(pid), {}).get("name", pid))
+    for s in sorted(new_sales, key=lambda r: (str(r.get("date")), po.sort_key(_pn(r.get("productId"))))):
         p = products.get(str(s.get("productId")), {})
-        lines.append(f"  • {e(p.get('name', s.get('productId')))} — "
+        lines.append(f"  • {e(po.short_name(p.get('name', str(s.get('productId')))))} — "
                      f"{sa.fmt1(sa._num(s.get('qty')))} {_unit(p)} ({sa.ddmm(s.get('date'))})")
 
     # Sotuv sanasi oldingi sanoqqa tushsa -> o'sha sanoq natijasi o'zgaradi
-    for pid in sorted({s.get("productId") for s in new_sales}, key=str):
+    for pid in sorted({s.get("productId") for s in new_sales}, key=lambda x: po.sort_key(_pn(x))):
         old = {i["countId"]: i for i in
                sa.analyze_client_product(blob_before, site_client_id, pid)["intervals"]}
         new = sa.analyze_client_product(blob_after, site_client_id, pid)["intervals"]
-        pname = e(products.get(str(pid), {}).get("name", pid))
+        pname = e(po.short_name(_pn(pid)))
         for iv in new:
             o = old.get(iv["countId"])
             if o and abs(o["rawSold"] - iv["rawSold"]) > 0.001:

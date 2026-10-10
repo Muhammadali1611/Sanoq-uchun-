@@ -20,6 +20,7 @@ from pathlib import Path
 from PIL import Image, ImageDraw, ImageFont
 
 import site_analysis as sa
+import product_order
 
 FONT_DIR = Path(__file__).resolve().parent / "fonts"
 MONTHS_UZ = ["", "Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul",
@@ -78,15 +79,16 @@ def build_report(blob, site_client_id, product_ids, date_str, time_str,
             state = "normal"
 
         rows.append({
-            "name": p.get("name", str(pid)), "price": price,
+            "name": product_order.short_name(p.get("name", str(pid))),
+            "full_name": p.get("name", str(pid)), "price": price,
             "prev": prev, "deliv": deliv, "today": today_q, "raw": raw, "sold": sold,
             "days": days, "from": from_date, "daily": daily, "cover": cover,
             "state": state, "days_idle": a["daysSinceLastSale"],
             "is_low": is_low, "is_stuck": is_stuck, "is_susp": is_susp,
         })
 
-    order = {"shubhali": 0, "kam": 1, "turgan": 2, "sekin": 3, "normal": 4, "tez": 5, "yangi": 6}
-    rows.sort(key=lambda r: (order.get(r["state"], 9), -(r["sold"] or 0), r["name"]))
+    # Segment tartibida: Kreta -> Biora -> Dom -> Standart -> Remost -> ...
+    rows.sort(key=lambda r: product_order.sort_key(r["full_name"]))
 
     # Asosiy davr: ko'p mahsulotda uchraydigan oldingi sana
     prev_date = Counter(prev_dates).most_common(1)[0][0] if prev_dates else None
@@ -401,17 +403,23 @@ def build_caption(rep) -> str:
                  + (f", ~{_kun(rep['total_cover'])}ga yetadi" if rep["total_cover"] is not None else ""))
     warn = []
     if rep["low"]:
-        warn.append("⚠️ <b>Kam qoldi:</b> " + ", ".join(
-            f"{e(r['name'])} ({_n(r['today'])})" for r in rep["low"]))
+        warn.append(f"⚠️ <b>Kam qoldi ({len(rep['low'])} ta, min {sa.LOW_STOCK}):</b>")
+        warn += [f"   • {e(r['name'])} — <b>{_n(r['today'])}</b> qop" for r in rep["low"]]
     if rep["stuck"]:
-        warn.append("🔴 <b>Turib qolgan:</b> " + ", ".join(e(r["name"]) for r in rep["stuck"]))
+        if warn:
+            warn.append("")
+        warn.append("🔴 <b>Turib qolgan:</b>")
+        warn += [f"   • {e(r['name'])} — {r['days_idle'] or '?'} kun sotilmagan" for r in rep["stuck"]]
     if rep["susp"]:
-        warn.append("❗ <b>Tekshiring:</b> " + ", ".join(
-            f"{e(r['name'])} (+{_n(-r['raw'])})" for r in rep["susp"]))
+        if warn:
+            warn.append("")
+        warn.append("❗ <b>Qayta sanang:</b>")
+        warn += [f"   • {e(r['name'])} — hisobdan {_n(-r['raw'])} qop ko'p" for r in rep["susp"]]
     if warn:
         lines.append("")
         lines += warn
         if rep["low"]:
-            lines.append("👉 Akaga yuk taklif qilish kerak!")
+            lines.append("")
+            lines.append("👉 <b>Akaga yuk taklif qilish kerak!</b>")
     cap = "\n".join(lines)
     return cap if len(cap) <= 1000 else cap[:990] + "…"

@@ -223,7 +223,9 @@ async def get_products(active_only: bool = True):
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(q)
-        return [dict(r) for r in await cur.fetchall()]
+        rows = [dict(r) for r in await cur.fetchall()]
+    import product_order   # Kreta -> Biora -> Dom -> Standart -> Remost -> ...
+    return product_order.sort_products(rows)
 
 
 async def get_product(product_id: int):

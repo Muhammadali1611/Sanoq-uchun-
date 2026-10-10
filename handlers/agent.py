@@ -9,6 +9,7 @@ import asyncio
 import logging
 
 import database as db
+import product_order
 import group_notify
 import site_analysis as sa
 import sklad_sync  # sayt (CP Sklad) bilan sinxronizatsiya
@@ -206,11 +207,14 @@ async def count_done(call: CallbackQuery, state: FSMContext):
 
     lines = [f"✅ <b>{data['client_name']}</b> sanaldi ({today})\n"]
     total_value = 0.0
+    _rows = []
     for pid, qty in items.items():
-        p = await db.get_product(pid)
+        _rows.append((await db.get_product(pid), pid, qty))
+    _rows.sort(key=lambda x: product_order.sort_key(x[0]["name"]))
+    for p, pid, qty in _rows:
         value = qty * p["price"]
         total_value += value
-        line = f"• {p['name']}: <b>{qty:g}</b> {p['unit']} = {value:,.0f} so'm"
+        line = f"• {p['name']}: <b>{qty:g}</b> qop = {value:,.0f} so'm"
         if prev and pid in prev["items"]:
             delta = qty - prev["items"][pid]
             if delta < 0:
