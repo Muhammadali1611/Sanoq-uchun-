@@ -8,8 +8,8 @@ Har bir tovar uchun:
   taklif   = maqsad - bugungi qoldiq  -> 10 ga yuqoriga yaxlitlanadi
   turib qolgan (21+ kun sotilmagan) tovarga taklif berilmaydi.
 
-Logistika: bitta zakaz kamida MIN_ORDER_KG (1 tonna).
-  Taklif 1 t dan kam chiqsa -> eng tez sotilayotgan tovarlardan qo'shib 1 t ga
+Logistika: Qo'qon va yaqin joylarga zakaz kamida 1 t, uzoqroq joylarga 2 t.
+  Taklif minimumdan kam chiqsa -> eng tez sotilayotgan tovarlardan qo'shib minimumga
   yetkaziladi (eng kam kunga yetadiganiga birinchi). Hech narsa kerak bo'lmasa —
   "keyingi zakaz taxminan N kundan keyin" deb aytadi.
 
@@ -27,7 +27,29 @@ import product_order as po
 TARGET_DAYS = int(os.getenv("ORDER_TARGET_DAYS", "21") or 21)
 MIN_STOCK = sa.LOW_STOCK                      # 30 qop
 ROUND_TO = int(os.getenv("ORDER_ROUND", "10") or 10)
-MIN_ORDER_KG = int(os.getenv("MIN_ORDER_KG", "1000") or 1000)
+MIN_ORDER_KG = int(os.getenv("MIN_ORDER_KG", "1000") or 1000)          # Qo'qon va yaqin joylar
+MIN_ORDER_KG_FAR = int(os.getenv("MIN_ORDER_KG_FAR", "2000") or 2000)  # uzoqroq joylar
+# Yaqin hududlar (1 t). Ro'yxatda yo'q hudud — uzoq (2 t). ENV NEAR_REGIONS bilan o'zgartirsa bo'ladi.
+NEAR_REGIONS = os.getenv("NEAR_REGIONS", "Qo'qon,Goriskiy,Dang'ara,Uchko'prik,Bog'dod,Rishton,"
+                         "Beshariq,Oqjar,Bachqir,Yaypan,Buvayda,Rapqon")
+
+
+def _rnorm(s):
+    s = (s or "").lower().strip()
+    for ch in "'`ʻʼ’‘":
+        s = s.replace(ch, "")
+    return s.replace(" ", "")
+
+
+_NEAR = {_rnorm(x) for x in NEAR_REGIONS.split(",") if x.strip()}
+
+
+def min_order_kg(region):
+    """Hudud bo'yicha zakaz minimumi: yaqin — 1 t, uzoq — 2 t. Hudud noma'lum — 1 t."""
+    r = _rnorm(region)
+    if not r or r in ("—", "-"):
+        return MIN_ORDER_KG
+    return MIN_ORDER_KG if r in _NEAR else MIN_ORDER_KG_FAR
 RATE_WINDOW = 60                              # kun
 REORDER_COVER = 7                             # shuncha kunga qolganda zakaz vaqti
 
@@ -65,7 +87,7 @@ def rate_60(blob, cid, pid, today_str, fallback=None):
     return fallback
 
 
-def advise(blob, cid, rows, today_str):
+def advise(blob, cid, rows, today_str, region=None):
     """rows — report_image.build_report() qatorlari. Qaytaradi: taklif lug'ati."""
     items = []
     for r in rows:
@@ -84,17 +106,19 @@ def advise(blob, cid, rows, today_str):
                       "kg_guess": guessed, "stuck": stuck, "base": base, "qty": base,
                       "extra": 0, "reason": reason})
 
+    min_kg = min_order_kg(region)
+
     def total_kg():
         return sum(i["qty"] * i["kg"] for i in items)
 
     topped = 0
-    if 0 < total_kg() < MIN_ORDER_KG:
+    if 0 < total_kg() < min_kg:
         # 1 t ga yetkazish: eng tez sotiladiganlardan, eng kam kunga yetadiganiga birinchi
         cand = [i for i in items if not i["stuck"] and (i["rate"] or 0) > 0]
         if not cand:
             cand = [i for i in items if not i["stuck"] and i["qty"] > 0]
         guard = 0
-        while total_kg() < MIN_ORDER_KG and cand and guard < 200:
+        while total_kg() < min_kg and cand and guard < 200:
             guard += 1
             pick = min(cand, key=lambda i: (i["today"] + i["qty"]) / (i["rate"] or 0.01))
             pick["qty"] += ROUND_TO
@@ -118,7 +142,7 @@ def advise(blob, cid, rows, today_str):
         next_days = round(min(ds)) if ds else None
 
     return {"items": items, "order": order, "bags": tot_bags, "kg": tot_kg, "sum": tot_sum,
-            "topped": topped, "min_kg": MIN_ORDER_KG, "target_days": TARGET_DAYS,
+            "topped": topped, "min_kg": min_kg, "far": min_kg > MIN_ORDER_KG, "target_days": TARGET_DAYS,
             "next_days": next_days, "kg_guess": any(i["kg_guess"] for i in order)}
 
 

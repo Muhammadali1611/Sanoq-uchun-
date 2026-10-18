@@ -131,7 +131,7 @@ def build_report(blob, site_client_id, product_ids, date_str, time_str,
         "is_today": date_str >= sa.today(),
     }
     try:
-        rep["advice"] = oa.advise(blob, site_client_id, rows, today_str)
+        rep["advice"] = oa.advise(blob, site_client_id, rows, today_str, client.get("region"))
         rep["insights"] = oa.insights(rep, rep["advice"], today_str)
     except Exception:
         import logging
@@ -395,14 +395,16 @@ def render_png(rep, scale=2) -> bytes:
         rect(PAD, y, 5, ORD_H, C["blue"], r=2)
         text(PAD + 22, y + 15, "BUYURTMA TAKLIFI", F("b", 15), C["blue"])
         text(PAD + 22, y + 40, f"{adv['target_days']} kunlik zaxira  ·  har tovardan min {sa.LOW_STOCK} qop  ·  "
-             f"zakaz min {oa.tonnes(adv['min_kg'])}", F("r", 13), C["muted"])
+             f"zakaz min {oa.tonnes(adv['min_kg'])}" + (" (uzoq hudud)" if adv.get("far") else " (yaqin hudud)"),
+             F("r", 13), C["muted"])
         oy = y + 72
         if n_ord:
             for it in adv["order"]:
                 d.ellipse([(PAD + 24) * S, (oy + 6) * S, (PAD + 34) * S, (oy + 16) * S], fill=C["blue"])
                 text(PAD + 46, oy + 1, it["name"], F("s", 15), C["ink"])
-                why = ("1 t ga yetkazish uchun" if it["base"] == 0 and it["extra"] else
-                       (f"+{it['extra']} — 1 t uchun" if it["extra"] else it["reason"]))
+                mt = oa.tonnes(adv["min_kg"])
+                why = (f"{mt} ga yetkazish uchun" if it["base"] == 0 and it["extra"] else
+                       (f"+{it['extra']} — {mt} uchun" if it["extra"] else it["reason"]))
                 if why:
                     text(PAD + 300, oy + 2, why, F("r", 13), C["muted"])
                 text(W - PAD - 300, oy + 1, f"{it['qty']} qop", F("b", 15), C["blue"], "ra")
@@ -416,7 +418,8 @@ def render_png(rep, scale=2) -> bytes:
             text(PAD + 32, oy + 29, f"JAMI:  {adv['bags']} qop  ·  {oa.tonnes(adv['kg'])}  ·  "
                  f"{_money(adv['sum'])} so'm", F("b", 16), C["head"], "lm")
             ok = adv["kg"] >= adv["min_kg"]
-            text(W - PAD - 32, oy + 29, ("1 t minimum bajarildi" if ok else "1 t dan kam!"),
+            mt = oa.tonnes(adv["min_kg"])
+            text(W - PAD - 32, oy + 29, (f"{mt} minimum bajarildi" if ok else f"{mt} dan kam!"),
                  F("s", 14), C["green"] if ok else C["red"], "rm")
         else:
             msg = "Hozircha zakaz kerak emas — qoldiq yetarli."
@@ -483,11 +486,11 @@ def build_caption(rep) -> str:
     if adv and adv["order"]:
         warn.append(f"🛒 <b>Buyurtma taklifi</b> ({adv['target_days']} kunlik zaxira):")
         for it in adv["order"]:
-            tag = f" <i>(+{it['extra']} — 1 t uchun)</i>" if it["extra"] else ""
+            tag = f" <i>(+{it['extra']} — {oa.tonnes(adv['min_kg'])} uchun)</i>" if it["extra"] else ""
             warn.append(f"   • {e(it['name'])} — <b>{it['qty']}</b> qop{tag}")
         warn.append(f"📦 <b>Jami: {adv['bags']} qop · {oa.tonnes(adv['kg'])} · "
                     f"{_money(adv['sum'])} so'm</b>"
-                    + (" ✅" if adv["kg"] >= adv["min_kg"] else " ⚠️ 1 t dan kam"))
+                    + (" ✅" if adv["kg"] >= adv["min_kg"] else f" ⚠️ {oa.tonnes(adv['min_kg'])} dan kam"))
     elif adv:
         warn.append("✅ Hozircha zakaz kerak emas — qoldiq yetarli."
                     + (f" Keyingi zakaz ~{adv['next_days']} kundan keyin." if adv["next_days"] is not None else ""))
