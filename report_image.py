@@ -21,6 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 import site_analysis as sa
 import product_order
+import order_advice as oa
 
 FONT_DIR = Path(__file__).resolve().parent / "fonts"
 MONTHS_UZ = ["", "Yanvar", "Fevral", "Mart", "Aprel", "May", "Iyun", "Iyul",
@@ -79,7 +80,7 @@ def build_report(blob, site_client_id, product_ids, date_str, time_str,
             state = "normal"
 
         rows.append({
-            "name": product_order.short_name(p.get("name", str(pid))),
+            "pid": pid, "name": product_order.short_name(p.get("name", str(pid))),
             "full_name": p.get("name", str(pid)), "price": price,
             "prev": prev, "deliv": deliv, "today": today_q, "raw": raw, "sold": sold,
             "days": days, "from": from_date, "daily": daily, "cover": cover,
@@ -109,7 +110,7 @@ def build_report(blob, site_client_id, product_ids, date_str, time_str,
     on_shelf = len([r for r in rows if r["today"] > 0
                     and not any(r["name"].lower().startswith(x) for x in excluded)])
 
-    return {
+    rep = {
         "client": client.get("name", str(site_client_id)),
         "region": client.get("region") or "",
         "agent": agent_name or "—",
@@ -129,6 +130,14 @@ def build_report(blob, site_client_id, product_ids, date_str, time_str,
         "susp": [r for r in rows if r["is_susp"]],
         "is_today": date_str >= sa.today(),
     }
+    try:
+        rep["advice"] = oa.advise(blob, site_client_id, rows, today_str)
+        rep["insights"] = oa.insights(rep, rep["advice"], today_str)
+    except Exception:
+        import logging
+        logging.getLogger("report").exception("buyurtma taklifi hisoblanmadi")
+        rep["advice"], rep["insights"] = None, []
+    return rep
 
 
 # ===========================================================================
@@ -199,14 +208,17 @@ def render_png(rep, scale=2) -> bytes:
     HEAD_H = 66  # ikki qatorli sarlavha: nom + sana/davr
     pd_txt = _ddmm(rep["prev_date"]) if rep["prev_date"] else "—"
     td_txt = _ddmm(rep["date"])
-    cols = [("Mahsulot", 250, "l", ""),
-            ("Oldingi", 84, "r", pd_txt),
-            ("Berildi", 104, "r", f"{pd_txt}–{td_txt}" if rep["prev_date"] else "—"),
-            ("Bugun", 80, "r", td_txt),
-            ("Sotdi", 84, "r", f"{pdays} kunda" if pdays else "—"),
-            ("Kuniga", 80, "r", "o'rtacha"),
-            ("Yetadi", 100, "r", "qoldiq"),
-            ("Holat", 162, "c", "")]
+    adv = rep.get("advice")
+    adv_q = {i["pid"]: i for i in (adv["items"] if adv else [])}
+    cols = [("Mahsulot", 214, "l", ""),
+            ("Oldingi", 76, "r", pd_txt),
+            ("Berildi", 96, "r", f"{pd_txt}–{td_txt}" if rep["prev_date"] else "—"),
+            ("Bugun", 74, "r", td_txt),
+            ("Sotdi", 80, "r", f"{pdays} kunda" if pdays else "—"),
+            ("Kuniga", 74, "r", "o'rtacha"),
+            ("Yetadi", 92, "r", "qoldiq"),
+            ("Taklif", 88, "r", "qop"),
+            ("Holat", 150, "c", "")]
     table_w = sum(c[1] for c in cols)  # = W - 2*PAD
 
     alerts = []
@@ -214,16 +226,22 @@ def render_png(rep, scale=2) -> bytes:
         alerts.append(("purple", f"{r['name']} — qoldiq hisobdan {_n(-r['raw'])} qop ko'p. "
                        + ("Bugun yuk berilgan bo'lsa, ertaga sotuv kiritilgach yangilanadi."
                           if rep["is_today"] else "Sotuv kiritilmagan yoki xato sanalgan.")))
-    for r in rep["low"]:
-        tail = f", ~{_kun(r['cover'])}ga yetadi" if r["cover"] is not None else ""
-        alerts.append(("red", f"{r['name']} — {_n(r['today'])} qop qoldi{tail}. "
-                       f"Min {sa.LOW_STOCK} — yuk taklif qiling."))
+    if not adv:
+        for r in rep["low"]:
+            tail = f", ~{_kun(r['cover'])}ga yetadi" if r["cover"] is not None else ""
+            alerts.append(("red", f"{r['name']} — {_n(r['today'])} qop qoldi{tail}. "
+                           f"Min {sa.LOW_STOCK} — yuk taklif qiling."))
     for r in rep["stuck"]:
         alerts.append(("orange", f"{r['name']} — {r['days_idle']} kundan beri sotilmayapti "
                        f"({_n(r['today'])} qop turibdi)."))
 
+    ins = rep.get("insights") or []
+    n_ord = len(adv["order"]) if adv else 0
+    ORD_H = (0 if not adv else (72 + 34 * n_ord + 68 if n_ord else 112))
+    INS_H = (46 + 34 * len(ins)) if ins else 0
     H = (PAD + 120 + 18 + 112 + 18 + HEAD_H + ROW_H * (len(rows) + 1) + 18
-         + (46 + 34 * len(alerts) if alerts else 0) + 50 + PAD)
+         + (ORD_H + 18 if ORD_H else 0) + (INS_H + 18 if INS_H else 0)
+         + (46 + 34 * len(alerts) + 18 if alerts else 0) + 40 + PAD)
     img = Image.new("RGB", (W * S, H * S), C["bg"])
     d = ImageDraw.Draw(img)
 
@@ -301,7 +319,7 @@ def render_png(rep, scale=2) -> bytes:
         if ri % 2 == 1:
             rect(tx, yy, table_w, ROW_H, C["zebra"])
         cy = yy + ROW_H / 2
-        nm = r["name"] if len(r["name"]) <= 24 else r["name"][:23] + "…"
+        nm = r["name"] if len(r["name"]) <= 21 else r["name"][:20] + "…"
         note = None
         if r["days"] is None:
             note = "birinchi sanoq"
@@ -335,10 +353,18 @@ def render_png(rep, scale=2) -> bytes:
         col = (C["red"] if (r["cover"] is not None and r["cover"] <= 7) or r["today"] <= 0
                else (C["ink"] if r["cover"] is not None else C["faint"]))
         text(x, cy, cov, F("s" if col == C["red"] else "r", 15), col, anc)
+        x, anc = cx(7)
+        ai = adv_q.get(r["pid"])
+        if ai and ai["qty"] > 0:
+            text(x, cy, f"+{ai['qty']}", F("b", 16), C["blue"], anc)
+        elif ai and ai["stuck"]:
+            text(x, cy, "yo'q", F("r", 14), C["orange"], anc)
+        else:
+            text(x, cy, "—", F("r", 16), C["faint"], anc)
         label, fg, bg = PILL.get(r["state"], PILL["normal"])
         pf = F("s", 13)
         tw = d.textlength(label, font=pf) / S
-        px, _ = cx(7)
+        px, _ = cx(8)
         rect(px - tw / 2 - 12, cy - 13, tw + 24, 26, bg, r=13)
         text(px, cy, label, pf, fg, "mm")
         d.line([(tx + 12) * S, (yy + ROW_H) * S, (tx + table_w - 12) * S, (yy + ROW_H) * S],
@@ -356,10 +382,61 @@ def render_png(rep, scale=2) -> bytes:
     x, anc = cx(4); text(x, cy, _n(rep["sum_sold"]), F("b", 16), C["green"], anc)
     x, anc = cx(5); text(x, cy, _n(rep["sum_daily"]) if rep["sum_daily"] else "—", F("s", 16), C["head"], anc)
     x, anc = cx(6); text(x, cy, _kun(rep["total_cover"]), F("s", 15), C["head"], anc)
+    x, anc = cx(7)
+    text(x, cy, (f"+{adv['bags']}" if adv and adv["bags"] else "—"), F("b", 16), C["blue"], anc)
     on, tot = rep["shelf"]
-    px, _ = cx(7)
+    px, _ = cx(8)
     text(px, cy, f"Polka: {on}/{tot}", F("s", 14), C["head"], "mm")
     y = yy + ROW_H + 18
+
+    # --- Buyurtma taklifi -------------------------------------------------
+    if adv:
+        rect(PAD, y, W - 2 * PAD, ORD_H, C["card"], r=12)
+        rect(PAD, y, 5, ORD_H, C["blue"], r=2)
+        text(PAD + 22, y + 15, "BUYURTMA TAKLIFI", F("b", 15), C["blue"])
+        text(PAD + 22, y + 40, f"{adv['target_days']} kunlik zaxira  ·  har tovardan min {sa.LOW_STOCK} qop  ·  "
+             f"zakaz min {oa.tonnes(adv['min_kg'])}", F("r", 13), C["muted"])
+        oy = y + 72
+        if n_ord:
+            for it in adv["order"]:
+                d.ellipse([(PAD + 24) * S, (oy + 6) * S, (PAD + 34) * S, (oy + 16) * S], fill=C["blue"])
+                text(PAD + 46, oy + 1, it["name"], F("s", 15), C["ink"])
+                why = ("1 t ga yetkazish uchun" if it["base"] == 0 and it["extra"] else
+                       (f"+{it['extra']} — 1 t uchun" if it["extra"] else it["reason"]))
+                if why:
+                    text(PAD + 300, oy + 2, why, F("r", 13), C["muted"])
+                text(W - PAD - 300, oy + 1, f"{it['qty']} qop", F("b", 15), C["blue"], "ra")
+                text(W - PAD - 190, oy + 1, f"{it['qty'] * it['kg']:,} kg".replace(",", " "),
+                     F("r", 14), C["muted"], "ra")
+                text(W - PAD - 24, oy + 1, f"{round(it['qty'] * it['price']):,} so'm".replace(",", " "),
+                     F("r", 14), C["muted"], "ra")
+                oy += 34
+            # jami
+            rect(PAD + 16, oy + 6, W - 2 * PAD - 32, 46, C["blue_bg"], r=10)
+            text(PAD + 32, oy + 29, f"JAMI:  {adv['bags']} qop  ·  {oa.tonnes(adv['kg'])}  ·  "
+                 f"{_money(adv['sum'])} so'm", F("b", 16), C["head"], "lm")
+            ok = adv["kg"] >= adv["min_kg"]
+            text(W - PAD - 32, oy + 29, ("1 t minimum bajarildi" if ok else "1 t dan kam!"),
+                 F("s", 14), C["green"] if ok else C["red"], "rm")
+        else:
+            msg = "Hozircha zakaz kerak emas — qoldiq yetarli."
+            if adv["next_days"] is not None:
+                msg += f" Keyingi zakaz taxminan {adv['next_days']} kundan keyin."
+            text(PAD + 22, oy + 4, msg, F("s", 16), C["green"])
+        y += ORD_H + 18
+
+    # --- Aqlli xulosa -----------------------------------------------------
+    if ins:
+        rect(PAD, y, W - 2 * PAD, INS_H, C["card"], r=12)
+        rect(PAD, y, 5, INS_H, C["accent"], r=2)
+        text(PAD + 22, y + 15, "AQLLI XULOSA", F("b", 15), C["orange"])
+        iy = y + 46
+        for kind, msg in ins:
+            d.ellipse([(PAD + 24) * S, (iy + 6) * S, (PAD + 34) * S, (iy + 16) * S], fill=C[kind])
+            m = msg if len(msg) <= 112 else msg[:110] + "…"
+            text(PAD + 46, iy + 1, m, F("r", 15), C["ink"])
+            iy += 34
+        y += INS_H + 18
 
     # --- E'tibor bering ---------------------------------------------------
     if alerts:
@@ -373,12 +450,12 @@ def render_png(rep, scale=2) -> bytes:
             m = msg if len(msg) <= 112 else msg[:110] + "…"
             text(PAD + 46, ay + 1, m, F("r", 15), C["ink"])
             ay += 34
-        y += ah
+        y += ah + 18
 
     # --- Izoh -------------------------------------------------------------
-    text(PAD + 4, y + 16, "Sotdi = oldingi + berildi − bugun   ·   Kuniga = sotdi ÷ kun   ·   "
+    text(PAD + 4, y + 0, "Sotdi = oldingi + berildi − bugun   ·   Kuniga = sotdi ÷ kun   ·   "
          "Yetadi = bugun ÷ kuniga", F("r", 13), C["muted"])
-    text(W - PAD - 4, y + 16, "CP Sklad", F("s", 13), C["muted"], "ra")
+    text(W - PAD - 4, y + 0, "CP Sklad", F("s", 13), C["muted"], "ra")
 
     out = io.BytesIO()
     img.save(out, format="PNG", optimize=True)
@@ -402,24 +479,39 @@ def build_caption(rep) -> str:
     lines.append(f"📦 Qoldiq: {_n(rep['sum_today'])} qop"
                  + (f", ~{_kun(rep['total_cover'])}ga yetadi" if rep["total_cover"] is not None else ""))
     warn = []
-    if rep["low"]:
+    adv = rep.get("advice")
+    if adv and adv["order"]:
+        warn.append(f"🛒 <b>Buyurtma taklifi</b> ({adv['target_days']} kunlik zaxira):")
+        for it in adv["order"]:
+            tag = f" <i>(+{it['extra']} — 1 t uchun)</i>" if it["extra"] else ""
+            warn.append(f"   • {e(it['name'])} — <b>{it['qty']}</b> qop{tag}")
+        warn.append(f"📦 <b>Jami: {adv['bags']} qop · {oa.tonnes(adv['kg'])} · "
+                    f"{_money(adv['sum'])} so'm</b>"
+                    + (" ✅" if adv["kg"] >= adv["min_kg"] else " ⚠️ 1 t dan kam"))
+    elif adv:
+        warn.append("✅ Hozircha zakaz kerak emas — qoldiq yetarli."
+                    + (f" Keyingi zakaz ~{adv['next_days']} kundan keyin." if adv["next_days"] is not None else ""))
+    elif rep["low"]:
         warn.append(f"⚠️ <b>Kam qoldi ({len(rep['low'])} ta, min {sa.LOW_STOCK}):</b>")
         warn += [f"   • {e(r['name'])} — <b>{_n(r['today'])}</b> qop" for r in rep["low"]]
+    if rep.get("insights"):
+        warn.append("")
+        warn.append("🧠 <b>Aqlli xulosa:</b>")
+        icon = {"green": "🟢", "red": "🔴", "orange": "🟠", "blue": "📅"}
+        warn += [f"   {icon.get(k, '•')} {e(m)}" for k, m in rep["insights"]]
     if rep["stuck"]:
-        if warn:
-            warn.append("")
+        warn.append("")
         warn.append("🔴 <b>Turib qolgan:</b>")
         warn += [f"   • {e(r['name'])} — {r['days_idle'] or '?'} kun sotilmagan" for r in rep["stuck"]]
     if rep["susp"]:
-        if warn:
-            warn.append("")
+        warn.append("")
         warn.append("❗ <b>Qayta sanang:</b>")
         warn += [f"   • {e(r['name'])} — hisobdan {_n(-r['raw'])} qop ko'p" for r in rep["susp"]]
     if warn:
         lines.append("")
         lines += warn
-        if rep["low"]:
+        if adv and adv["order"]:
             lines.append("")
-            lines.append("👉 <b>Akaga yuk taklif qilish kerak!</b>")
+            lines.append("👉 <b>Akaga shu zakazni taklif qiling!</b>")
     cap = "\n".join(lines)
     return cap if len(cap) <= 1000 else cap[:990] + "…"
