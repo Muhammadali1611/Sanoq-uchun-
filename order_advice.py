@@ -154,15 +154,17 @@ def insights(rep, adv, today_str):
     """Qisqa aqlli xulosalar (3-4 ta)."""
     out = []
     movers = [i for i in adv["items"] if (i["rate"] or 0) > 0]
-    if movers:
+    fast_name = None
+    if len(movers) >= 2:   # bitta tovar bo'lsa "eng tez" ma'nosiz
         f = max(movers, key=lambda i: i["rate"])
+        fast_name = f["name"]
         out.append(("green", f"Eng tez sotilayotgani — {f['name']}: kuniga ~{_n(f['rate'])} qop."))
     slow = [r for r in rep["rows"] if r["cover"] is not None and r["cover"] >= sa.SLOW_COVER
-            and r["today"] >= MIN_STOCK]
+            and r["today"] >= MIN_STOCK and r["name"] != fast_name]
     if slow:
         s = max(slow, key=lambda r: r["cover"])
-        out.append(("orange", f"{s['name']} sekin: {_n(s['today'])} qop ~{round(s['cover'])} kunga "
-                    f"yetadi — hozircha qo'shimcha taklif qilmang."))
+        out.append(("orange", f"{s['name']}: {_n(s['today'])} qop ~{round(s['cover'])} kunga "
+                    f"yetadi — zaxira ko'p, hozircha qo'shimcha taklif qilmang."))
     # tezlik o'zgarishi: shu davr vs 60 kunlik
     if rep["sum_daily"]:
         r60 = sum((i["rate"] or 0) for i in adv["items"])
