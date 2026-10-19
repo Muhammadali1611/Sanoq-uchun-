@@ -95,7 +95,11 @@ def advise(blob, cid, rows, today_str, region=None):
         rate = rate_60(blob, cid, r["pid"], today_str, fallback=r["daily"])
         stuck = r["is_stuck"] or (r["days_idle"] is not None and r["days_idle"] >= sa.STUCK_DAYS
                                   and r["today"] > 0)
-        if stuck:
+        bought = any(sa._same(x.get("clientId"), cid) and sa._same(x.get("productId"), r["pid"])
+                     and sa._num(x.get("qty")) > 0 for x in blob.get("sales", []))
+        if not bought:
+            base, reason = 0, "avval olmagan"   # faqat oladigan tovarlarini taklif qilamiz
+        elif stuck:
             base, reason = 0, "turib qolgan"
         else:
             target = max(MIN_STOCK, (rate or 0) * TARGET_DAYS)
@@ -103,7 +107,7 @@ def advise(blob, cid, rows, today_str, region=None):
             reason = "kam qoldi" if r["today"] < MIN_STOCK else ("tez ketyapti" if base else "")
         items.append({"name": r["name"], "full_name": r["full_name"], "pid": r["pid"],
                       "price": r["price"], "today": r["today"], "rate": rate, "kg": kg,
-                      "kg_guess": guessed, "stuck": stuck, "base": base, "qty": base,
+                      "kg_guess": guessed, "stuck": stuck or not bought, "bought": bought, "base": base, "qty": base,
                       "extra": 0, "reason": reason})
 
     min_kg = min_order_kg(region)
