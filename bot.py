@@ -4,6 +4,7 @@ Ishga tushirish:  python bot.py
 """
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -17,6 +18,7 @@ import group_notify      # guruhga avto xabarlar (topiclar)
 import bot_state         # xodimlar/sozlamalar zaxirasi (Supabase)
 import catalog_sync      # tovar/klent ro'yxati saytdan
 import agent_topics      # agent -> o'z topici (avtomatik)
+import ish_vaqti         # 8:00-20:00 ish vaqti (WORK_HOURS)
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s | %(levelname)s | %(message)s")
@@ -25,6 +27,10 @@ logging.basicConfig(level=logging.INFO,
 async def main():
     if not config.BOT_TOKEN:
         raise SystemExit("BOT_TOKEN topilmadi! .env faylga BOT_TOKEN yozing.")
+    if not ish_vaqti.ish_vaqtimi():
+        logging.info("Ish vaqtidan tashqari — bot ishga tushmaydi (WORK_HOURS=%s)",
+                     os.getenv("WORK_HOURS"))
+        return
 
     await db.init_db()
     await group_notify.init()
@@ -37,6 +43,13 @@ async def main():
         await catalog_sync.sync_from_site()   # tovar/klentlar — saytdagi nomlar bilan
     except Exception:
         logging.exception("Katalog saytdan olinmadi (eski ro'yxat bilan davom etiladi)")
+    if config.FRESH_DB:
+        # Yangi (volume) baza: oldingi sanoqlarni saytdan avtomatik tiklaymiz
+        try:
+            st = await import_from_site.run_import()
+            logging.info("Yangi baza: saytdan tiklandi — %s", st)
+        except Exception:
+            logging.exception("Saytdan avtomatik tiklash xatosi (/import_sayt bilan qo'lda qiling)")
 
     bot = Bot(
         token=config.BOT_TOKEN,
@@ -63,10 +76,12 @@ async def main():
     # Saytga kiritilgan yangi sotuvlarni kuzatish (har SALES_CHECK_MIN daqiqa)
     watcher = asyncio.create_task(group_notify.sales_watcher(bot))
 
+    guard = asyncio.create_task(ish_vaqti.tugash_kutuvchi(dp.stop_polling))
     try:
         await dp.start_polling(bot)
     finally:
         watcher.cancel()
+        guard.cancel()
 
 
 if __name__ == "__main__":

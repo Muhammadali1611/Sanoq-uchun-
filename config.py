@@ -23,8 +23,16 @@ ADMIN_IDS = [int(x.strip()) for x in _admin_raw.split(",") if x.strip().isdigit(
 # Railway'da Volume (/data) bo'lsa — o'sha yerda saqlanadi (deploy'da o'chmaydi).
 # Bo'lmasa — loyiha papkasida (kompyuterda test uchun).
 _VOLUME_DIR = "/data"
+FRESH_DB = False   # True -> volume'dagi baza hozirgina yaratildi (saytdan tiklash kerak)
 if os.path.isdir(_VOLUME_DIR):
     DB_PATH = os.path.join(_VOLUME_DIR, "sklad.db")
+    if not os.path.exists(DB_PATH):
+        # Birinchi marta: repodagi tayyor bazani (klent/tovar) volume'ga ko'chiramiz
+        import shutil
+        _seed = BASE_DIR / "sklad.db"
+        if _seed.exists():
+            shutil.copy2(_seed, DB_PATH)
+        FRESH_DB = True
 else:
     DB_PATH = str(BASE_DIR / "sklad.db")
 

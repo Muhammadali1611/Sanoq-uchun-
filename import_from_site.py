@@ -106,11 +106,26 @@ async def import_sayt(message: Message):
     await message.answer("Saytdan ma'lumot yuklanyapti... (biroz kuting)")
 
     try:
-        blob = await _run_blocking(_fetch_site_blob)
+        st = await run_import()
     except Exception as e:
         log.exception("sayt o'qishda xato")
         await message.answer(f"Xato: saytga ulanib bo'lmadi.\n{e}")
         return
+
+    await message.answer(
+        "✅ Import tugadi.\n\n"
+        f"Sayt yozuvlari: {st['total']}\n"
+        f"Qo'shildi: {st['added']} ta sanoq\n"
+        f"O'tkazib yuborildi (mavjud edi): {st['skipped']}\n"
+        f"Xato/mos kelmadi: {st['errors']}\n\n"
+        "Endi botdan istalgan sanadagi sanoqni topsa bo'ladi."
+    )
+
+
+async def run_import() -> dict:
+    """Saytdagi barcha sanoqlarni botning SQLite bazasiga tiklaydi.
+    /import_sayt va bot ishga tushganda (yangi baza bo'lsa) ishlatiladi."""
+    blob = await _run_blocking(_fetch_site_blob)
 
     site_clients  = blob.get("clients", [])
     site_products = blob.get("products", [])
@@ -191,14 +206,8 @@ async def import_sayt(message: Message):
 
         await conn.commit()
 
-    await message.answer(
-        "✅ Import tugadi.\n\n"
-        f"Sayt yozuvlari: {len(site_counts)}\n"
-        f"Qo'shildi: {added_sessions} ta sanoq\n"
-        f"O'tkazib yuborildi (mavjud edi): {skipped}\n"
-        f"Xato/mos kelmadi: {errors}\n\n"
-        "Endi botdan istalgan sanadagi sanoqni topsa bo'ladi."
-    )
+    return {"total": len(site_counts), "added": added_sessions,
+            "skipped": skipped, "errors": errors}
 
 
 # aiogram loop'ini bloklamaslik uchun
