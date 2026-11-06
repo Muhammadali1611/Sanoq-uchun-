@@ -21,11 +21,11 @@ from sklad_sync import _norm
 log = logging.getLogger("agent_topics")
 
 GROUP_CHAT_ID = -1003913010631
-KNOWN_TOPICS = {"Abduqodir sanoq": 2, "Muhammadamin sanoq": 4}
+KNOWN_TOPICS = {"Abduqodir sanoq": 2, "Abdumalik sanoq": 4}
 # (telegram_id, ism, topic_id) — bir marta qo'shiladi (seed_v1)
 SEED_AGENTS = [
     (8317612695, "Abduqodir", 2),
-    (8317562764, "Muhammadamin", 4),
+    (8317562764, "Abdumalik", 4),
 ]
 OWNER_TEST_ID = 5774173398   # Muhammadali — sinov sanoqlari Generalga
 SKIP_WORDS = {"aka", "opa", "sanoq", "agent", "hisobot", "general"}
@@ -87,8 +87,28 @@ async def auto_assign(user_id, full_name):
     return m[0]
 
 
+# Agent almashsa (telefon/Telegram akkaunt o'sha, odam yangi) — bazadagi ismni yangilash.
+# (telegram_id, eski_ism, yangi_ism)
+RENAMES = [
+    (8317562764, "Muhammadamin", "Abdumalik"),   # 2026-11: Muhammadamin ketdi, telefon Abdumalikka berildi
+]
+
+
+async def apply_renames():
+    """Bazada eski ism turgan bo'lsa yangisiga almashtiradi (rol va topic o'zgarmaydi)."""
+    for uid, old, new in RENAMES:
+        u = await db.get_user(uid)
+        if u and u.get("full_name") == old:
+            await db.add_user(uid, new, u.get("role") or "agent", added_by=u.get("added_by"))
+            log.info("Agent ismi yangilandi: %s %s -> %s", uid, old, new)
+
+
 async def seed():
     """Bir martalik: ma'lum agentlarni qo'shadi va topiclariga ulaydi."""
+    try:
+        await apply_renames()
+    except Exception:
+        log.exception("Agent ismini yangilashda xato")
     if await gn.get_setting("seed_v1_done"):
         return
     if not await gn.get_group_chat():

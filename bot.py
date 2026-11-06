@@ -36,7 +36,7 @@ async def main():
     await group_notify.init()
     await bot_state.restore()   # xodimlar + guruh sozlamalari Supabase'dan
     try:
-        await agent_topics.seed()   # Abduqodir/Muhammadamin -> o'z topiclari (bir marta)
+        await agent_topics.seed()   # Abduqodir/Abdumalik -> o'z topiclari (bir marta)
     except Exception:
         logging.exception("agent/topic boshlang'ich sozlash xatosi")
     try:
